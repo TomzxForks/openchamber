@@ -1,0 +1,54 @@
+---
+title: "Skills Catalog"
+status: draft
+---
+
+# Requirements: Skills Catalog
+
+## Overview
+
+OpenChamber includes a skills catalog for discovering, installing, and managing reusable automation packages (skills) that extend agent behavior. Skills are loaded from remote catalogs and managed locally per project.
+
+## Stakeholders
+
+| Stakeholder | Interest |
+|---|---|
+| Developers | Extend agent capabilities with reusable automation packages |
+| Skill authors | Publish and share skills via catalogs |
+| Teams | Maintain project-specific skills for consistent agent behavior |
+
+## Functional Requirements
+
+| ID | Priority | Requirement |
+|---|---|---|
+| FR-01 | Must | The system shall display a skills catalog UI for browsing and searching available skills. |
+| FR-02 | Must | The system shall support installing skills from remote catalogs. |
+| FR-03 | Must | The system shall support local skill management (enable, disable, configure). |
+| FR-04 | Must | The system shall display installed skills that match OpenCode's own skill list. |
+| FR-05 | Should | The system shall support multiple skill sources/registries. |
+| FR-06 | Should | The system shall sync installed skills with the OpenCode server. |
+
+## Non-Functional Requirements
+
+| ID | Priority | Category | Requirement |
+|---|---|---|---|
+| NFR-01 | Must | Reliability | Skills catalog scans shall ignore stale or outdated results. |
+| NFR-02 | Should | Performance | Catalog loading shall not block the main UI thread. |
+
+## Constraints
+
+- Skills are defined by OpenCode's skill specification; OpenChamber is a management UI
+- Skills are stored on disk in the project's `.opencode/skills/` directory
+- Remote catalogs are fetched via HTTP
+
+## Acceptance Criteria
+
+- [ ] FR-01: Given the skills settings section, the user can browse and search available skills
+- [ ] FR-02: Given a skill in the catalog, the user can install it with one click
+- [ ] FR-03: Given installed skills, the user can enable, disable, or configure them
+- [ ] FR-04: Given OpenCode skills, the installed list matches what OpenCode reports
+
+## Open Questions
+
+1. What is the skill specification format?
+2. Are skills versioned, and if so, how are updates handled?

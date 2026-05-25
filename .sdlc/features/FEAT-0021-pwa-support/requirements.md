@@ -1,0 +1,41 @@
+---
+title: "PWA Support"
+status: draft
+---
+
+# Requirements: PWA Support
+
+## Overview
+
+Installable Progressive Web App with service worker for push notifications and offline handling, install prompt with dismissible toast, display mode detection, dynamic manifest sync for recent session shortcuts, and window controls overlay layout adaptation.
+
+## Stakeholders
+
+| Stakeholder | Interest |
+|---|---|
+| Mobile/tablet users | Install as app-like experience on home screen |
+| Desktop PWA users | Run in its own window outside the browser |
+
+## Functional Requirements
+
+| ID | Priority | Requirement |
+|---|---|---|
+| FR-01 | Must | The system shall be installable as a PWA with service worker. |
+| FR-02 | Must | The system shall handle push notifications via the service worker when the app is not visible. |
+| FR-03 | Must | The system shall show an install prompt toast that can be dismissed without reappearing. |
+| FR-04 | Must | The system shall detect display mode (standalone, fullscreen, window-controls-overlay). |
+| FR-05 | Should | The system shall sync the PWA manifest with recent session shortcuts. |
+| FR-06 | Should | The system shall adapt layout for window controls overlay mode. |
+| FR-07 | Should | The system shall support configurable install orientation. |
+
+## Acceptance Criteria
+
+- [ ] FR-01: Given a supported browser, the user can install OpenChamber as a PWA
+- [ ] FR-02: Given the PWA is closed, push notifications still appear
+- [ ] FR-03: Given the install prompt, dismissing it prevents repeated prompts
+- [ ] FR-04: Given the PWA is in standalone mode, the UI adapts (no browser chrome)
+
+## Open Questions
+
+1. What offline capabilities are supported (full offline, cached shell only)?
+2. How are service worker updates deployed?

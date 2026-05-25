@@ -1,0 +1,44 @@
+---
+title: "Model Picker"
+status: draft
+---
+
+# Requirements: Model Picker
+
+## Overview
+
+An organized model selection UI that categorizes available models by provider, supports favoriting/starred models, tracks recently used models, allows hiding unwanted models, and provides search/filter. Model selections persist per-session and per-agent.
+
+## Stakeholders
+
+| Stakeholder | Interest |
+|---|---|
+| All users | Quickly switch between AI models during conversations |
+| Power users | Manage favorites and hide irrelevant models |
+
+## Functional Requirements
+
+| ID | Priority | Requirement |
+|---|---|---|
+| FR-01 | Must | The system shall display available models organized by provider. |
+| FR-02 | Must | The system shall support favoriting models for quick access. |
+| FR-03 | Must | The system shall track recently used models. |
+| FR-04 | Must | The system shall allow hiding unwanted models from the picker. |
+| FR-05 | Must | The system shall support search/filter across all models. |
+| FR-06 | Should | The system shall persist model selection per-session and per-agent. |
+| FR-07 | Should | The system shall support favorite-model cycling via keyboard shortcuts. |
+| FR-08 | Should | The system shall display model cost indicators and capability icons. |
+
+## Acceptance Criteria
+
+- [ ] FR-01: Given the model picker, models are grouped by provider with provider logos
+- [ ] FR-02: Given a model, clicking the star icon adds it to favorites
+- [ ] FR-03: Given the model picker, recently used models appear in a dedicated section
+- [ ] FR-04: Given a model, the user can hide it from future display
+- [ ] FR-05: Given the model picker, typing filters models by name
+- [ ] FR-07: Given configured favorites, a keyboard shortcut cycles through them
+
+## Open Questions
+
+1. How are model capabilities and pricing data sourced?
+2. Is there a maximum number of favorites?
