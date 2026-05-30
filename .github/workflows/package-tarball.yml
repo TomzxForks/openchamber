@@ -1,0 +1,62 @@
+name: Package Tarball
+
+# Builds @openchamber/web and packs it into an installable npm tarball.
+# Download the uploaded artifact, then test it with:
+#   npm install ./openchamber-web-<version>.tgz
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build packages
+        run: bun run build
+
+      - name: Create npm tarball
+        id: pack
+        working-directory: packages/web
+        run: |
+          TARBALL=$(npm pack)
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "Created $TARBALL"
+
+      - name: Smoke test install from tarball
+        working-directory: packages/web
+        run: |
+          set -euo pipefail
+          WORKDIR="$(mktemp -d)"
+          TARBALL_PATH="$PWD/${{ steps.pack.outputs.tarball }}"
+          cd "$WORKDIR"
+          npm init -y >/dev/null
+          npm install "$TARBALL_PATH"
+          test -d node_modules/@openchamber/web
+          echo "Installed @openchamber/web from tarball successfully."
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: openchamber-web-tarball
+          path: packages/web/*.tgz
+          if-no-files-found: error
