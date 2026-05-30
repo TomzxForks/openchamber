@@ -51,6 +51,15 @@ jobs:
           test -d node_modules/@openchamber/web
           echo "Installed @openchamber/web from tarball successfully."
 
+      - name: Smoke test run via npx
+        working-directory: packages/web
+        run: |
+          set -euo pipefail
+          TARBALL_PATH="$PWD/${{ steps.pack.outputs.tarball }}"
+          # Runs the packaged `openchamber` bin straight from the tarball.
+          npx --yes "$TARBALL_PATH" --version
+          npx --yes "$TARBALL_PATH" --help
+
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v7
         with:
