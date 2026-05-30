@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const enableMinify = process.env.VITE_ENABLE_MINIFY !== '0';
 
 export default defineConfig(({ mode }) => ({
   root: path.resolve(__dirname, 'webview'),
@@ -50,6 +51,7 @@ export default defineConfig(({ mode }) => ({
     include: ['@opencode-ai/sdk/v2'],
   },
   build: {
+    minify: enableMinify,
     outDir: path.resolve(__dirname, 'dist/webview'),
     emptyOutDir: true,
     rollupOptions: {

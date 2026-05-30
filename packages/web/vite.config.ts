@@ -9,6 +9,7 @@ import { themeStoragePlugin } from '../../vite-theme-plugin';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
+const enableMinify = process.env.VITE_ENABLE_MINIFY !== '0';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 
@@ -97,6 +98,7 @@ export default defineConfig({
     },
   },
   build: {
+    minify: enableMinify,
     outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,
     chunkSizeWarningLimit: 500,
