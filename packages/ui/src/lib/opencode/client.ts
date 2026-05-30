@@ -210,6 +210,17 @@ class OpencodeService {
   private directoryContextQueue: Promise<void> = Promise.resolve();
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
+  private inflightRequests = new Map<string, Promise<unknown>>();
+
+  private dedup<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const pending = this.inflightRequests.get(key);
+    if (pending) return pending as Promise<T>;
+    const p = fn().finally(() => {
+      if (this.inflightRequests.get(key) === p) this.inflightRequests.delete(key);
+    });
+    this.inflightRequests.set(key, p);
+    return p;
+  }
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const desktopBase = resolveDesktopBaseUrl();
@@ -426,22 +437,27 @@ class OpencodeService {
     if (!normalized) {
       return false;
     }
-    try {
-      const response = await this.client.path.get({ directory: normalized });
-      const info = response.data as { directory?: unknown } | undefined;
-      const returned = typeof info?.directory === 'string' ? info.directory : null;
-      return Boolean(returned && returned.trim().length > 0);
-    } catch {
-      return false;
-    }
+    return this.dedup(`probe:${normalized}`, async () => {
+      try {
+        const response = await this.client.path.get({ directory: normalized });
+        const info = response.data as { directory?: unknown } | undefined;
+        const returned = typeof info?.directory === 'string' ? info.directory : null;
+        return Boolean(returned && returned.trim().length > 0);
+      } catch {
+        return false;
+      }
+    });
   }
 
   // Session Management
   async listSessions(): Promise<Session[]> {
-    const response = await this.client.session.list(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    return Array.isArray(response.data) ? response.data : [];
+    const dir = this.currentDirectory;
+    return this.dedup(`ls:${dir ?? ''}`, async () => {
+      const response = await this.client.session.list(
+        dir ? { directory: dir } : undefined
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    });
   }
 
   async createSession(params?: { parentID?: string; title?: string }): Promise<Session> {
@@ -455,12 +471,15 @@ class OpencodeService {
   }
 
   async getSession(id: string): Promise<Session> {
-    const response = await this.client.session.get({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
+    const dir = this.currentDirectory;
+    return this.dedup(`gs:${dir ?? ''}:${id}`, async () => {
+      const response = await this.client.session.get({
+        sessionID: id,
+        ...(dir ? { directory: dir } : {})
+      });
+      if (!response.data) throw new Error('Session not found');
+      return response.data;
     });
-    if (!response.data) throw new Error('Session not found');
-    return response.data;
   }
 
   async deleteSession(id: string): Promise<boolean> {
@@ -482,43 +501,49 @@ class OpencodeService {
   }
 
   async getSessionMessages(id: string, limit?: number): Promise<{ info: Message; parts: Part[] }[]> {
-    const response = await this.client.session.messages({
-      sessionID: id,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      ...(typeof limit === 'number' ? { limit } : {}),
+    const dir = this.currentDirectory;
+    return this.dedup(`gm:${dir ?? ''}:${id}:${limit ?? ''}`, async () => {
+      const response = await this.client.session.messages({
+        sessionID: id,
+        ...(dir ? { directory: dir } : {}),
+        ...(typeof limit === 'number' ? { limit } : {}),
+      });
+      return response.data || [];
     });
-    return response.data || [];
   }
 
   async getSessionTodos(sessionId: string): Promise<Array<{ id: string; content: string; status: string; priority: string }>> {
-    try {
-      const base = this.baseUrl.replace(/\/$/, "");
-      const url = new URL(`${base}/session/${encodeURIComponent(sessionId)}/todo`);
+    const dir = this.currentDirectory;
+    return this.dedup(`gt:${dir ?? ''}:${sessionId}`, async () => {
+      try {
+        const base = this.baseUrl.replace(/\/$/, "");
+        const url = new URL(`${base}/session/${encodeURIComponent(sessionId)}/todo`);
 
-      if (this.currentDirectory && this.currentDirectory.length > 0) {
-        url.searchParams.set("directory", this.currentDirectory);
-      }
+        if (dir && dir.length > 0) {
+          url.searchParams.set("directory", dir);
+        }
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          return [];
+        }
+
+        const data = await response.json().catch(() => null);
+        if (!data || !Array.isArray(data)) {
+          return [];
+        }
+
+        return data as Array<{ id: string; content: string; status: string; priority: string }>;
+      } catch {
         return [];
       }
-
-      const data = await response.json().catch(() => null);
-      if (!data || !Array.isArray(data)) {
-        return [];
-      }
-
-      return data as Array<{ id: string; content: string; status: string; priority: string }>;
-    } catch {
-      return [];
-    }
+    });
   }
 
   /**
@@ -984,38 +1009,40 @@ class OpencodeService {
   async getSessionStatusForDirectory(
     directory: string | null | undefined
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
-    try {
-      const base = this.baseUrl.replace(/\/$/, "");
-      const url = new URL(`${base}/session/status`);
+    const trimmed = typeof directory === "string" ? directory.trim() : "";
+    return this.dedup(`ss:${trimmed}`, async () => {
+      try {
+        const base = this.baseUrl.replace(/\/$/, "");
+        const url = new URL(`${base}/session/status`);
 
-      const trimmedDirectory = typeof directory === "string" ? directory.trim() : "";
-      if (trimmedDirectory.length > 0) {
-        url.searchParams.set("directory", trimmedDirectory);
-      }
+        if (trimmed.length > 0) {
+          url.searchParams.set("directory", trimmed);
+        }
 
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          return null;
+        }
+
+        const data = await response.json().catch(() => null);
+        if (!data || typeof data !== "object") {
+          return null;
+        }
+
+        return data as Record<
+          string,
+          { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
+        >;
+      } catch {
         return null;
       }
-
-      const data = await response.json().catch(() => null);
-      if (!data || typeof data !== "object") {
-        return null;
-      }
-
-      return data as Record<
-        string,
-        { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
-      >;
-    } catch {
-      return null;
-    }
+    });
   }
 
   async getGlobalSessionStatus(): Promise<
@@ -1032,43 +1059,45 @@ class OpencodeService {
   async getWebServerSessionActivity(): Promise<
     Record<string, { type: string }> | null
   > {
-    try {
-      // Web server endpoint - use relative path that works with both dev and prod
-      const response = await fetch('/api/session-activity', {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json',
-        },
-      });
+    return this.dedup('wsa', async () => {
+      try {
+        const response = await fetch('/api/session-activity', {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          return null;
+        }
+
+        const data = await response.json().catch(() => null);
+        if (!data || typeof data !== 'object') {
+          return null;
+        }
+
+        return data as Record<string, { type: string }>;
+      } catch {
         return null;
       }
-
-      const data = await response.json().catch(() => null);
-      if (!data || typeof data !== 'object') {
-        return null;
-      }
-
-      return data as Record<string, { type: string }>;
-    } catch {
-      return null;
-    }
+    });
   }
 
   // Tools
   async listToolIds(options?: { directory?: string | null }): Promise<string[]> {
-    try {
-      const directory = typeof options?.directory === 'string'
-        ? options.directory.trim()
-        : (this.currentDirectory ? this.currentDirectory.trim() : '');
-
-      const result = await this.client.tool.ids(directory ? { directory } : undefined);
-      const tools = (result.data || []) as unknown as string[];
-      return tools.filter((tool) => typeof tool === 'string' && tool !== 'invalid');
-    } catch {
-      return [];
-    }
+    const directory = typeof options?.directory === 'string'
+      ? options.directory.trim()
+      : (this.currentDirectory ? this.currentDirectory.trim() : '');
+    return this.dedup(`tools:${directory}`, async () => {
+      try {
+        const result = await this.client.tool.ids(directory ? { directory } : undefined);
+        const tools = (result.data || []) as unknown as string[];
+        return tools.filter((tool) => typeof tool === 'string' && tool !== 'invalid');
+      } catch {
+        return [];
+      }
+    });
   }
 
   // Permissions
@@ -1093,48 +1122,50 @@ class OpencodeService {
    * "server returned no pending permissions".
    */
   async listPendingPermissions(options?: { directories?: Array<string | null | undefined> }): Promise<PermissionRequest[]> {
-    const fetches: Array<Promise<PermissionRequest[]>> = [];
+    const dirKey = JSON.stringify(options?.directories ?? null);
+    return this.dedup(`perm:${dirKey}`, async () => {
+      const fetches: Array<Promise<PermissionRequest[]>> = [];
 
-    const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
-      const trimmed = typeof directory === 'string' ? directory.trim() : '';
-      const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
-      if (result.error) {
-        throw new Error(`permission.list failed: ${formatSdkError(result.error)}`);
+      const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
+        const trimmed = typeof directory === 'string' ? directory.trim() : '';
+        const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
+        if (result.error) {
+          throw new Error(`permission.list failed: ${formatSdkError(result.error)}`);
+        }
+        return (result.data || []) as unknown as PermissionRequest[];
+      };
+
+      fetches.push(fetchForDirectory(null));
+
+      const uniqueDirectories = new Set<string>();
+      for (const entry of options?.directories ?? []) {
+        const normalized = this.normalizeCandidatePath(entry ?? null);
+        if (normalized) {
+          uniqueDirectories.add(normalized);
+        }
       }
-      return (result.data || []) as unknown as PermissionRequest[];
-    };
 
-    // Try unscoped first (server may return global pending items).
-    fetches.push(fetchForDirectory(null));
-
-    const uniqueDirectories = new Set<string>();
-    for (const entry of options?.directories ?? []) {
-      const normalized = this.normalizeCandidatePath(entry ?? null);
-      if (normalized) {
-        uniqueDirectories.add(normalized);
+      for (const directory of uniqueDirectories) {
+        fetches.push(fetchForDirectory(directory));
       }
-    }
 
-    for (const directory of uniqueDirectories) {
-      fetches.push(fetchForDirectory(directory));
-    }
+      const results = await Promise.all(fetches);
+      const merged: PermissionRequest[] = [];
+      const seenIds = new Set<string>();
 
-    const results = await Promise.all(fetches);
-    const merged: PermissionRequest[] = [];
-    const seenIds = new Set<string>();
-
-    for (const list of results) {
-      for (const item of list) {
-        if (!item || typeof item !== 'object') continue;
-        const id = (item as { id?: unknown }).id;
-        if (typeof id !== 'string' || id.length === 0) continue;
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        merged.push(item);
+      for (const list of results) {
+        for (const item of list) {
+          if (!item || typeof item !== 'object') continue;
+          const id = (item as { id?: unknown }).id;
+          if (typeof id !== 'string' || id.length === 0) continue;
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          merged.push(item);
+        }
       }
-    }
 
-    return merged;
+      return merged;
+    });
   }
 
   // Questions ("ask" tool)
@@ -1171,55 +1202,59 @@ class OpencodeService {
    * instead of conflating failure with an empty server response.
    */
   async listPendingQuestions(options?: { directories?: Array<string | null | undefined> }): Promise<QuestionRequest[]> {
-    const fetches: Array<Promise<QuestionRequest[]>> = [];
+    const dirKey = JSON.stringify(options?.directories ?? null);
+    return this.dedup(`q:${dirKey}`, async () => {
+      const fetches: Array<Promise<QuestionRequest[]>> = [];
 
-    const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
-      const trimmed = typeof directory === 'string' ? directory.trim() : '';
-      const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
-      if (result.error) {
-        throw new Error(`question.list failed: ${formatSdkError(result.error)}`);
+      const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
+        const trimmed = typeof directory === 'string' ? directory.trim() : '';
+        const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
+        if (result.error) {
+          throw new Error(`question.list failed: ${formatSdkError(result.error)}`);
+        }
+        return (result.data || []) as unknown as QuestionRequest[];
+      };
+
+      fetches.push(fetchForDirectory(null));
+
+      const uniqueDirectories = new Set<string>();
+      for (const entry of options?.directories ?? []) {
+        const normalized = this.normalizeCandidatePath(entry ?? null);
+        if (normalized) {
+          uniqueDirectories.add(normalized);
+        }
       }
-      return (result.data || []) as unknown as QuestionRequest[];
-    };
 
-    // Try unscoped first (server may return global pending items).
-    fetches.push(fetchForDirectory(null));
-
-    const uniqueDirectories = new Set<string>();
-    for (const entry of options?.directories ?? []) {
-      const normalized = this.normalizeCandidatePath(entry ?? null);
-      if (normalized) {
-        uniqueDirectories.add(normalized);
+      for (const directory of uniqueDirectories) {
+        fetches.push(fetchForDirectory(directory));
       }
-    }
 
-    for (const directory of uniqueDirectories) {
-      fetches.push(fetchForDirectory(directory));
-    }
+      const results = await Promise.all(fetches);
+      const merged: QuestionRequest[] = [];
+      const seenIds = new Set<string>();
 
-    const results = await Promise.all(fetches);
-    const merged: QuestionRequest[] = [];
-    const seenIds = new Set<string>();
-
-    for (const list of results) {
-      for (const item of list) {
-        if (!item || typeof item !== 'object') continue;
-        const id = (item as { id?: unknown }).id;
-        if (typeof id !== 'string' || id.length === 0) continue;
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        merged.push(item);
+      for (const list of results) {
+        for (const item of list) {
+          if (!item || typeof item !== 'object') continue;
+          const id = (item as { id?: unknown }).id;
+          if (typeof id !== 'string' || id.length === 0) continue;
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          merged.push(item);
+        }
       }
-    }
 
-    return merged;
+      return merged;
+    });
   }
 
   // Configuration
   async getConfig(): Promise<Config> {
-    const response = await this.client.config.get();
-    if (!response.data) throw new Error('Failed to get config');
-    return response.data;
+    return this.dedup('cfg', async () => {
+      const response = await this.client.config.get();
+      if (!response.data) throw new Error('Failed to get config');
+      return response.data;
+    });
   }
 
   async updateConfig(config: Record<string, unknown>): Promise<Config> {
@@ -1266,11 +1301,14 @@ class OpencodeService {
     providers: Provider[];
     default: { [key: string]: string };
   }> {
-    const response = await this.client.config.providers(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    if (!response.data) throw new Error('Failed to get providers');
-    return response.data;
+    const dir = this.currentDirectory;
+    return this.dedup(`prov:${dir ?? ''}`, async () => {
+      const response = await this.client.config.providers(
+        dir ? { directory: dir } : undefined
+      );
+      if (!response.data) throw new Error('Failed to get providers');
+      return response.data;
+    });
   }
 
   // App Management - using config endpoint since /app doesn't exist in this version
@@ -1299,13 +1337,16 @@ class OpencodeService {
    * empty list would defeat retries and clear the cached agent list.
    */
   async listAgents(): Promise<Agent[]> {
-    const response = await this.client.app.agents(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
-    if (response.error) {
-      throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
-    }
-    return response.data || [];
+    const dir = this.currentDirectory;
+    return this.dedup(`agents:${dir ?? ''}`, async () => {
+      const response = await this.client.app.agents(
+        dir ? { directory: dir } : undefined
+      );
+      if (response.error) {
+        throw new Error(`app.agents failed: ${formatSdkError(response.error)}`);
+      }
+      return response.data || [];
+    });
   }
 
   // SSE infrastructure removed — EventPipeline in sync/event-pipeline.ts handles
@@ -1364,125 +1405,133 @@ class OpencodeService {
 
   // Command Management
   async listCommands(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return only lightweight info for autocomplete
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        // Intentionally excluding template to keep memory usage low
-      }));
-    } catch {
-      return [];
-    }
+    const dir = this.currentDirectory;
+    return this.dedup(`cmds:${dir ?? ''}`, async () => {
+      try {
+        const response = await this.client.command.list(
+          dir ? { directory: dir } : undefined
+        );
+        return (response.data || []).map((cmd: Record<string, unknown>) => ({
+          name: cmd.name as string,
+          description: cmd.description as string | undefined,
+          agent: cmd.agent as string | undefined,
+          model: cmd.model as string | undefined,
+          source: cmd.source as string | undefined,
+        }));
+      } catch {
+        return [];
+      }
+    });
   }
 
   async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; source?: string; template?: string }>> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
-      // Return full command details including template
-      return (response.data || []).map((cmd: Record<string, unknown>) => ({
-        name: cmd.name as string,
-        description: cmd.description as string | undefined,
-        agent: cmd.agent as string | undefined,
-        model: cmd.model as string | undefined,
-        source: cmd.source as string | undefined,
-        template: cmd.template as string | undefined,
-      }));
-    } catch {
-      return [];
-    }
+    const dir = this.currentDirectory;
+    return this.dedup(`cmdsd:${dir ?? ''}`, async () => {
+      try {
+        const response = await this.client.command.list(
+          dir ? { directory: dir } : undefined
+        );
+        return (response.data || []).map((cmd: Record<string, unknown>) => ({
+          name: cmd.name as string,
+          description: cmd.description as string | undefined,
+          agent: cmd.agent as string | undefined,
+          model: cmd.model as string | undefined,
+          source: cmd.source as string | undefined,
+          template: cmd.template as string | undefined,
+        }));
+      } catch {
+        return [];
+      }
+    });
   }
 
   async listSkillsWithDetails(): Promise<Array<{ name: string; description?: string; location: string; content?: string }>> {
-    try {
-      const response = await this.client.app.skills(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined,
-      );
-      const data = response.data;
-      if (!Array.isArray(data)) {
+    const dir = this.currentDirectory;
+    return this.dedup(`skills:${dir ?? ''}`, async () => {
+      try {
+        const response = await this.client.app.skills(
+          dir ? { directory: dir } : undefined,
+        );
+        const data = response.data;
+        if (!Array.isArray(data)) {
+          return [];
+        }
+
+        const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
+        for (const item of data as Array<Record<string, unknown>>) {
+            const name = typeof item.name === 'string' ? item.name.trim() : '';
+            const location = typeof item.location === 'string' ? item.location : '';
+            if (!name || !location) {
+              continue;
+            }
+            const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
+            if (typeof item.description === 'string') skill.description = item.description;
+            if (typeof item.content === 'string') skill.content = item.content;
+            skills.push(skill);
+        }
+        return skills;
+      } catch {
         return [];
       }
-
-      const skills: Array<{ name: string; description?: string; location: string; content?: string }> = [];
-      for (const item of data as Array<Record<string, unknown>>) {
-          const name = typeof item.name === 'string' ? item.name.trim() : '';
-          const location = typeof item.location === 'string' ? item.location : '';
-          if (!name || !location) {
-            continue;
-          }
-          const skill: { name: string; description?: string; location: string; content?: string } = { name, location };
-          if (typeof item.description === 'string') skill.description = item.description;
-          if (typeof item.content === 'string') skill.content = item.content;
-          skills.push(skill);
-      }
-      return skills;
-    } catch {
-      return [];
-    }
+    });
   }
 
   async getCommandDetails(name: string): Promise<{ name: string; template: string; description?: string; agent?: string; model?: string } | null> {
-    try {
-      const response = await this.client.command.list(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
+    const dir = this.currentDirectory;
+    return this.dedup(`cmdd:${dir ?? ''}:${name}`, async () => {
+      try {
+        const response = await this.client.command.list(
+          dir ? { directory: dir } : undefined
+        );
 
-      if (response.data) {
-        const command = response.data.find((cmd: Record<string, unknown>) => cmd.name === name);
-        if (command) {
-          return {
-            name: command.name as string,
-            template: command.template as string,
-            description: command.description as string | undefined,
-            agent: command.agent as string | undefined,
-            model: command.model as string | undefined
-          };
+        if (response.data) {
+          const command = response.data.find((cmd: Record<string, unknown>) => cmd.name === name);
+          if (command) {
+            return {
+              name: command.name as string,
+              template: command.template as string,
+              description: command.description as string | undefined,
+              agent: command.agent as string | undefined,
+              model: command.model as string | undefined
+            };
+          }
         }
+        return null;
+      } catch {
+        return null;
       }
-      return null;
-    } catch {
-      return null;
-    }
+    });
   }
 
   // Health Check - using /health endpoint for detailed status
   async checkHealth(): Promise<boolean> {
-    try {
-      // Health endpoint is at root, not under /api
-      let healthUrl: string;
-      const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
-      if (normalizedBase === '/api') {
-        healthUrl = '/health';
-      } else if (normalizedBase.endsWith('/api')) {
-        // Desktop: http://127.0.0.1:PORT/api -> http://127.0.0.1:PORT/health
-        healthUrl = `${normalizedBase.slice(0, -4)}/health`;
-      } else {
-        healthUrl = `${normalizedBase}/health`;
-      }
-      const response = await fetch(healthUrl);
-      if (!response.ok) {
+    return this.dedup('health', async () => {
+      try {
+        let healthUrl: string;
+        const normalizedBase = this.baseUrl.endsWith('/') ? this.baseUrl.replace(/\/+$/, '') : this.baseUrl;
+        if (normalizedBase === '/api') {
+          healthUrl = '/health';
+        } else if (normalizedBase.endsWith('/api')) {
+          healthUrl = `${normalizedBase.slice(0, -4)}/health`;
+        } else {
+          healthUrl = `${normalizedBase}/health`;
+        }
+        const response = await fetch(healthUrl);
+        if (!response.ok) {
+          return false;
+        }
+
+        const healthData = await response.json();
+
+        if (healthData.isOpenCodeReady === false) {
+          return false;
+        }
+
+        return true;
+      } catch {
         return false;
       }
-
-      const healthData = await response.json();
-
-      // Check if the upstream API is ready (not just OpenChamber server)
-      if (healthData.isOpenCodeReady === false) {
-        return false;
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
+    });
   }
 
   // File System Operations
@@ -1637,71 +1686,76 @@ class OpencodeService {
       ? options.directory.trim()
       : this.currentDirectory;
     const normalizedDirectory = directory ? normalizeFsPath(directory) : null;
-    const scopedClient = directory ? this.getScopedApiClient(directory) : this.client;
+    const limit = typeof options?.limit === 'number' && Number.isFinite(options.limit) ? options.limit : '';
+    const dirs = options?.dirs === false || options?.type === 'file' ? '0' : '1';
+    const type = options?.type ?? '';
+    return this.dedup(`search:${normalizedDirectory ?? ''}:${query}:${limit}:${dirs}:${type}`, async () => {
+      const scopedClient = directory ? this.getScopedApiClient(directory) : this.client;
 
-    try {
-      const response = await scopedClient.find.files({
-        query,
-        limit: typeof options?.limit === 'number' && Number.isFinite(options.limit) ? options.limit : undefined,
-        dirs: options?.dirs === false || options?.type === 'file' ? 'false' : 'true',
-        type: options?.type,
-      });
+      try {
+        const response = await scopedClient.find.files({
+          query,
+          limit: typeof options?.limit === 'number' && Number.isFinite(options.limit) ? options.limit : undefined,
+          dirs: options?.dirs === false || options?.type === 'file' ? 'false' : 'true',
+          type: options?.type,
+        });
 
-      const items = Array.isArray(response?.data) ? response.data : [];
-      return items.map<ProjectFileSearchHit>((item) => {
-        const normalizedRelativePath = normalizeFsPath(item);
-        const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
-        const normalizedPath = normalizedDirectory
-          ? normalizeFsPath(`${normalizedDirectory}/${normalizedRelativePath}`)
-          : normalizeFsPath(normalizedRelativePath);
+        const items = Array.isArray(response?.data) ? response.data : [];
+        return items.map<ProjectFileSearchHit>((item) => {
+          const normalizedRelativePath = normalizeFsPath(item);
+          const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
+          const normalizedPath = normalizedDirectory
+            ? normalizeFsPath(`${normalizedDirectory}/${normalizedRelativePath}`)
+            : normalizeFsPath(normalizedRelativePath);
 
-        return {
-          name,
-          path: normalizedPath,
-          relativePath: normalizedRelativePath,
-          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
-        };
-      });
-    } catch (error) {
-      console.error('Failed to search files:', error);
-      throw error;
-    }
+          return {
+            name,
+            path: normalizedPath,
+            relativePath: normalizedRelativePath,
+            extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+          };
+        });
+      } catch (error) {
+        console.error('Failed to search files:', error);
+        throw error;
+      }
+    });
   }
 
   async getFilesystemHome(): Promise<string | null> {
-    // Optimization: Check for desktop runtime first to avoid unnecessary network calls
-    // and fix the "SyntaxError" warning when the endpoint is missing
-    const desktopHome = await getDesktopHomeDirectory();
-    if (desktopHome) {
-      return desktopHome;
-    }
+    return this.dedup('fsh', async () => {
+      const desktopHome = await getDesktopHomeDirectory();
+      if (desktopHome) {
+        return desktopHome;
+      }
 
-    try {
-      const response = await fetch(`${this.baseUrl}/fs/home`, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/json'
+      try {
+        const response = await fetch(`${this.baseUrl}/fs/home`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const message =
+            typeof error.error === 'string' && error.error.length > 0
+              ? error.error
+              : 'Failed to resolve home directory';
+          throw new Error(message);
         }
-      });
 
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        const message =
-          typeof error.error === 'string' && error.error.length > 0
-            ? error.error
-            : 'Failed to resolve home directory';
-        throw new Error(message);
+        const payload = await response.json();
+        if (payload && typeof payload.home === 'string' && payload.home.length > 0) {
+          return payload.home;
+        }
+        return null;
+      } catch (error) {
+        console.warn('Failed to resolve filesystem home directory:', error);
+        return null;
       }
-
-      const payload = await response.json();
-      if (payload && typeof payload.home === 'string' && payload.home.length > 0) {
-        return payload.home;
-      }
-      return null;
-    } catch (error) {
-      console.warn('Failed to resolve filesystem home directory:', error);
-      return null;
-    }
+    });
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {
