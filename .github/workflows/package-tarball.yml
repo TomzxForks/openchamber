@@ -56,9 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           TARBALL_PATH="$PWD/${{ steps.pack.outputs.tarball }}"
-          # Runs the packaged `openchamber` bin straight from the tarball.
-          npx --yes "$TARBALL_PATH" --version
-          npx --yes "$TARBALL_PATH" --help
+          # Installs the tarball and runs its `openchamber` bin. Using
+          # --package (rather than passing the path positionally) stops npx
+          # from trying to exec the .tgz file directly.
+          npx --yes --package "$TARBALL_PATH" -- openchamber --version
+          npx --yes --package "$TARBALL_PATH" -- openchamber --help
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v7
