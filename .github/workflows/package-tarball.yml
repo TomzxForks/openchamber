@@ -56,6 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           TARBALL_PATH="$PWD/${{ steps.pack.outputs.tarball }}"
+          # Run from a temp dir OUTSIDE the repo: inside the workspace, npm
+          # walks up to the root package.json and aborts on its `overrides`
+          # ("Override for ... conflicts with direct dependency").
+          WORKDIR="$(mktemp -d)"
+          cd "$WORKDIR"
           # Installs the tarball and runs its `openchamber` bin. Using
           # --package (rather than passing the path positionally) stops npx
           # from trying to exec the .tgz file directly.
