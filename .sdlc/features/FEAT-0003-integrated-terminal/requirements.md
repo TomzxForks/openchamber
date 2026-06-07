@@ -53,3 +53,8 @@ OpenChamber includes a fully integrated terminal emulator within the app UI, sup
 - [ ] FR-04: Given Ctrl+C is pressed, the running process receives SIGINT
 - [ ] FR-05: Given multiple terminal tabs, each maintains its own PTY session
 - [ ] NFR-04: Given 20 active terminal sessions, when a 21st session is requested, the response returns HTTP 429
+- [ ] FR-06: Given a terminal running a build or test with heavy output, the terminal renders without significant lag or stuttering
+- [ ] FR-07: Given a tablet device, the on-screen keyboard includes control keys (Ctrl, Alt, Tab)
+- [ ] NFR-01: Given a terminal session active during app shutdown, the WebSocket connection is closed cleanly without resource leaks
+- [ ] NFR-02: Given a terminal session idle for the timeout period, the WebSocket connection is closed and the PTY session is cleaned up
+- [ ] NFR-03: Given a mobile device with an open terminal, the viewport adjusts so the input line remains visible above the keyboard

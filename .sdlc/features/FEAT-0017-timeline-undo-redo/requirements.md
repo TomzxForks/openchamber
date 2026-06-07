@@ -37,6 +37,8 @@ A timeline dialog showing all messages in a session chronologically, allowing us
 - [ ] FR-03: Given a timeline, clicking fork on message N creates a new branch from that point
 - [ ] FR-04: Given a conversation with undo history, redo restores the previously undone turn
 - [ ] FR-05: Given the timeline dialog, search filters messages by content
+- [ ] FR-06: Given the timeline dialog, pressing up/down arrow keys navigates through turns
+- [ ] FR-07: Given a session with a large message history, the timeline renders progressively without blocking the UI
 - [ ] FR-08: Given a session with N user messages, the user can undo up to N times without hitting a depth limit
 - [ ] FR-09: Given undo/redo actions, no git commits are created or modified as a side effect
 

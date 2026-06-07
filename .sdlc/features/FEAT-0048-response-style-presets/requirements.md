@@ -35,5 +35,7 @@ Pre-defined response style presets that configure how the AI formats its output 
 - [ ] FR-01: Given the preset selector, multiple built-in styles are available
 - [ ] FR-02: Given a session, the user selects a response style preset
 - [ ] FR-03: Given an active preset, AI responses follow the style constraints
+- [ ] FR-04: Given the preset manager, the user creates a custom preset with custom style instructions and it appears in the preset list
+- [ ] FR-05: Given the preset selector, each preset shows a brief description of its style
 - [ ] FR-06: Given an active preset, it is injected as prompt context and not as a system prompt
 - [ ] FR-07: Given the preset settings, they are stored locally with no sharing or marketplace UI

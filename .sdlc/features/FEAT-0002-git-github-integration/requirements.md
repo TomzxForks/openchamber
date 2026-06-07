@@ -57,3 +57,10 @@ OpenChamber provides a full Git sidebar and GitHub-native workflows inside the a
 - [ ] FR-05: Given an open PR, the UI shows CI check status and merge button
 - [ ] FR-06: Given a GitHub issue, the user can start a session with the issue body as context
 - [ ] FR-07: Given a dirty worktree, the user can stash, sync, and pop stash
+- [ ] FR-08: Given a branch with a worktree, the user can merge changes back and resolve conflicts from the UI
+- [ ] FR-09: Given multiple Git identities configured, when committing, the user can select which identity to use and optionally add a gitmoji
+- [ ] FR-10: Given a fork of a repository, the user can push to multiple remotes and create a PR targeting the upstream
+- [ ] FR-11: Given a branch with diverged history, the user can initiate a rebase or merge and resolve conflicts inline
+- [ ] NFR-01: Given a directory with no git changes, git status polling uses lightweight change detection and skips heavy status fetches
+- [ ] NFR-02: Given a diff with 10,000+ changed files, the change list renders without UI freeze
+- [ ] NFR-03: Given GitHub OAuth tokens stored by the app, they are stored securely and refreshed automatically when expired

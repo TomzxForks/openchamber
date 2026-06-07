@@ -33,7 +33,10 @@ AI-powered generation of commit messages (subject + highlights) and PR descripti
 
 - [ ] FR-01: Given staged changes, clicking "Generate" produces a commit message
 - [ ] FR-02: Given a branch with commits ahead, clicking "Generate" produces a PR description
+- [ ] FR-03: Given generated content, the system parses structured JSON into subject and body
 - [ ] FR-04: Given generated content, clicking "Insert" fills the commit input or PR form
+- [ ] FR-05: Given a generated commit message, highlights are displayed alongside it
+- [ ] FR-06: Given generated content, a visual result card is shown
 - [ ] FR-07: Given a session with a configured model, generation uses that model without a dedicated hardcoded model
 - [ ] FR-08: Given Settings > Magic Prompts, the user can customize generation prompts and overrides are persisted server-side
 

@@ -33,6 +33,8 @@ Users can configure a preferred external application (from a catalog of 23+ supp
 - [ ] FR-01: Given a configured app, clicking "Open In" launches it with the project directory
 - [ ] FR-02: Given the app catalog, 23+ apps are available for selection
 - [ ] FR-03: Given the system, installed apps are detected and shown as available
+- [ ] FR-04: Given the app catalog, the user can select their preferred external app
+- [ ] FR-05: Given the header or file viewer, the user can trigger the "Open In" action
 - [ ] FR-06: Given the app catalog, the user cannot add custom apps beyond the 23 provided
 - [ ] FR-07: Given app preference set in one project, the same preference applies across all projects
 

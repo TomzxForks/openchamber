@@ -35,7 +35,10 @@ Create, manage, and delete git worktrees from the UI. Each worktree has its own 
 - [ ] FR-01: Given a project, the user creates a worktree with a generated branch name
 - [ ] FR-02: Given a worktree, it has its own session with isolated working directory
 - [ ] FR-03: Given a worktree, the user can delete it and its session is cleaned up
+- [ ] FR-04: Given a newly created worktree, a setup command runs automatically after creation
 - [ ] FR-05: Given multiple worktrees, the Agent Group view shows them organized by branch
+- [ ] FR-06: Given a worktree, the user can rename its branch or delete the branch from the worktree UI
+- [ ] FR-07: Given a draft-first workflow, the user creates a worktree instantly without specifying a target branch
 - [ ] FR-08: Given a PR, creating a worktree reuses the existing local branch if it matches
 - [ ] FR-09: Given a worktree with uncommitted changes, checkout is allowed; given deletion of a dirty worktree, a warning is shown; given a merge conflict, guided conflict handling is provided
 

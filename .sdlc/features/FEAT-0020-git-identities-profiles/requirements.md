@@ -34,6 +34,8 @@ Multiple git identity profiles (name + email + auth type + SSH key) that users c
 - [ ] FR-02: Given a project, the user selects a specific git identity for it
 - [ ] FR-03: Given existing git config, the system discovers and offers existing credentials
 - [ ] FR-04: Given gitmoji enabled, the commit input shows a gitmoji picker
+- [ ] FR-05: Given an identity profile, the user can select an SSH key to associate with it
+- [ ] FR-06: Given gitmoji data fetched from the remote API, subsequent loads use the cached version within the TTL
 - [ ] FR-07: Given an identity profile, the user can apply it globally or select it for a specific project
 
 ## Constraints

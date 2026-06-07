@@ -25,8 +25,6 @@ OpenChamber supports hands-free voice interaction via local Whisper speech-to-te
 | FR-03 | Should | The system shall sync speech recognition settings across devices via the server. |
 | FR-04 | Should | The system shall allow the server transcription to finish processing audio when voice input stops. |
 | FR-05 | May | The system shall support configurable TTS voice and speed settings. |
-
-| FR-05 | May | The system shall support configurable TTS voice and speed settings. |
 | FR-06 | Must | The system shall accept BCP-47 language codes for STT with auto-detect default, supporting any Whisper-supported language. |
 
 ## Non-Functional Requirements
@@ -47,5 +45,8 @@ OpenChamber supports hands-free voice interaction via local Whisper speech-to-te
 - [ ] FR-01: Given the user speaks into the microphone, the system transcribes the audio locally and inserts it as a chat message
 - [ ] FR-02: Given an assistant response, the user can trigger TTS to hear the response read aloud
 - [ ] FR-03: Given voice settings changed on one device, the settings are available on another device connected to the same server
+- [ ] FR-04: Given audio input stops, the server finishes processing the transcription before returning results
+- [ ] FR-05: Given TTS settings, the user can configure the voice and speech speed
 - [ ] FR-06: Given a BCP-47 language code in STT settings, the system uses that language for transcription
+- [ ] NFR-01: Given voice input, all speech transcription runs locally without sending audio to external services
 - [ ] NFR-02: Given voice input, audio data remains local and is never transmitted to external services

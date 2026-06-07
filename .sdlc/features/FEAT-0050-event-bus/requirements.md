@@ -72,11 +72,24 @@ Every runtime (web, desktop, VS Code) depends on this pipeline for live session 
 - [ ] FR-03: Given a client that disconnects and reconnects with a `Last-Event-ID`, the server replays buffered events since that ID
 - [ ] FR-04: Given an upstream SSE stall (no data for 20s), the server reconnects upstream while keeping browser WS alive
 - [ ] FR-05: Given two browser clients connected to the global hub, both receive the same event
+- [ ] FR-06: Given the server is running, it emits synthetic events (`openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, `openchamber:heartbeat`) to connected WS clients
 - [ ] FR-07: Given a browser client, the pipeline attempts WebSocket first and falls back to SSE after timeout
 - [ ] FR-08: Given a burst of 60 delta events in one second, the pipeline coalesces and batch-dispatches within flush frames
 - [ ] FR-09: Given a `message.part.delta` event, only the `part` state branch is cloned; `session`, `permission`, `message` references are preserved
 - [ ] FR-10: Given the browser tab is hidden, reconnect backoff uses the long cap (~60s); given the tab is visible, it uses the short cap (~5s)
 - [ ] FR-11: Given a client whose buffered bytes exceed 16MB, the server closes the connection with code 1013
+- [ ] FR-12: Given a client whose buffered bytes exceed 12MB, the server emits a backpressure warning frame before the hard disconnect at 16MB
 - [ ] FR-13: Given two directories with active sessions, each directory's sync store is updated independently
+- [ ] FR-14: Given a server-side event subscriber (e.g., OpenCode watcher), it receives events from the same global hub as browser clients without a separate upstream connection
+- [ ] FR-15: Given a WebSocket client with no attached upstream SSE stream, no heartbeat is sent on that connection
+- [ ] FR-16: Given a `message.part.delta` event, the client reducer returns the same object reference for state branches that were not mutated
+- [ ] FR-17: Given debug mode is enabled, the event pipeline logs each event type, dispatch batch, and coalesce frame to the console
 - [ ] FR-18: Given a server restart, all connected clients perform a full bootstrap and replay buffer events are lost
 - [ ] FR-19: Given a WebSocket payload, it is JSON-encoded without binary frame support
+- [ ] NFR-01: Given a stream of 60+ events per second, unrelated UI components do not re-render
+- [ ] NFR-02: Given a disconnected client with a valid `Last-Event-ID`, the replay buffer delivers missed events without requiring a full page reload
+- [ ] NFR-03: Given a `message.part.delta` event, the Zustand store clones only the `part` branch, preserving references to `session`, `message`, and `permission`
+- [ ] NFR-04: Given a background tab or offline browser, the reconnect interval uses ~60s backoff; given a visible tab, it uses ~5s
+- [ ] NFR-05: Given a WebSocket connection attempt without valid authentication, the server rejects the connection
+- [ ] NFR-06: Given more than 2048 events in the replay buffer, the oldest events are evicted to stay within the limit
+- [ ] NFR-07: Given a slow client with buffered bytes approaching 16MB, the server disconnects it without affecting other clients' performance

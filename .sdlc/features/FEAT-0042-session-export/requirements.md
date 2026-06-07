@@ -33,3 +33,5 @@ Export any chat session (including sub-agent sessions) as a structured Markdown 
 - [ ] FR-02: Given an exported file, timestamps and model info are present
 - [ ] FR-03: Given a session with sub-agents, the export includes their messages nested
 - [ ] FR-04: Given desktop, the native save dialog opens; given web, the file downloads
+- [ ] FR-05: Given the file is saved on desktop, clicking "Reveal" opens the file manager to its location
+- [ ] FR-06: Given web, desktop, and VS Code runtimes, the export dialog is accessible and functional in each

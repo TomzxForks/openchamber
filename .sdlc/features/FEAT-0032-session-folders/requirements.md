@@ -32,5 +32,7 @@ Users can organize sessions into named, nested folders per project. Folders supp
 - [ ] FR-01: Given the session sidebar, the user creates a named folder
 - [ ] FR-02: Given a folder, the user creates a subfolder inside it
 - [ ] FR-03: Given sessions and folders, the user can drag to reorder them
+- [ ] FR-04: Given a folder, the user can rename or delete it with confirmation
+- [ ] FR-05: Given a folder with nested items, the user can collapse or expand it
 - [ ] FR-06: Given a folder whose sessions are all deleted, it is cleaned up
 

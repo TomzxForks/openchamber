@@ -58,3 +58,9 @@ OpenChamber supports browser push notifications, desktop (Electron) notification
 - [ ] FR-06: Given an update prompt dismissed, it does not reappear on the next visit
 - [ ] FR-11: Given a push subscription, when the server returns HTTP 410, the subscription is removed from disk
 - [ ] NFR-03: Given a UI session token with 10 existing push subscriptions, when an 11th is registered, it is rejected
+- [ ] FR-07: Given a notification with long text, the text is truncated and optionally summarized before display
+- [ ] FR-08: Given the settings page, the user can disable OpenCode update notifications, and no update prompts appear
+- [ ] FR-09: Given a parent agent with subagents, when a subagent completes, the notification is suppressed in favor of the parent
+- [ ] FR-10: Given a PWA installed, push notifications arrive via VAPID when the app is closed
+- [ ] NFR-01: Given the same notification event, it appears only once across all panels and tabs
+- [ ] NFR-02: Given a notification with sensitive code content, the system notification area displays a generic description instead of the code

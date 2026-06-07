@@ -67,3 +67,11 @@ Order rows by priority: Must first, then Should, then May.
 - [ ] FR-08: Given a queue of 3 messages, when the first response completes, the next message sends automatically
 - [ ] NFR-05: Given a session with 300+ messages, when loading, only the initial page of 150 messages (30 for VS Code/mobile) is fetched
 - [ ] NFR-06: Given a directory with 60+ sessions, when sessions exceed the cap, the least recently used sessions are trimmed
+- [ ] FR-09: Given a diff, file, or plan with comment drafts, when the user sends the comment, it is delivered to the agent
+- [ ] FR-10: Given the session list, the user can create folders, move sessions into subfolders, and reorder them via drag-and-drop
+- [ ] FR-11: Given a message containing a Mermaid diagram, the diagram renders inline with copy and download buttons
+- [ ] FR-12: Given a chat message, when the user triggers share as image, a PNG screenshot of the message is generated and downloaded
+- [ ] NFR-01: Given a streaming assistant response, the UI updates at up to 60 deltas/sec without visible jank or layout thrash
+- [ ] NFR-02: Given an SSE connection drop, the client reconnects with exponential backoff and respects navigator.onLine and document.visibilityState
+- [ ] NFR-03: Given a failed API fetch returning an error, the error is not treated as an empty successful response
+- [ ] NFR-04: Given a session with scroll position, when switching sessions and returning, the scroll position is restored

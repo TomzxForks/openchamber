@@ -35,6 +35,9 @@ Installable Progressive Web App with service worker for push notifications and o
 - [ ] FR-02: Given the PWA is closed, push notifications still appear
 - [ ] FR-03: Given the install prompt, dismissing it prevents repeated prompts
 - [ ] FR-04: Given the PWA is in standalone mode, the UI adapts (no browser chrome)
+- [ ] FR-05: Given a session is active, the PWA manifest includes a shortcut for that session
+- [ ] FR-06: Given the PWA is in window-controls-overlay mode, the layout adapts to avoid the overlay region
+- [ ] FR-07: Given the PWA install prompt, the user can configure the install orientation before installation
 - [ ] FR-08: Given the PWA is offline, only the cached shell is available; full functionality requires a server connection
 
 ## Constraints

@@ -42,6 +42,8 @@ Dialogs that let users pick a GitHub issue or pull request and automatically sta
 - [ ] FR-03: Given a selected issue, a new session starts with the issue body as context
 - [ ] FR-04: Given a selected PR, the user can create a worktree from its branch
 - [ ] FR-05: Given an issue URL, the picker resolves it to the correct issue
+- [ ] FR-06: Given a selected PR, the system loads its description, comments, and check status as context for the session
+- [ ] FR-07: Given a forked repository, the issue/PR picker lists issues and PRs from both the source and the fork
 - [ ] FR-08: Given the issue/PR picker, only repos in the directory's git remote fork network are shown
 - [ ] NFR-01: Given authenticated GitHub API usage, the system operates within GitHub's rate limits without additional client-side throttling
 

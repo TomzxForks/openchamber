@@ -51,5 +51,9 @@ OpenChamber includes a skills catalog for discovering, installing, and managing 
 - [ ] FR-02: Given a skill in the catalog, the user can install it with one click
 - [ ] FR-03: Given installed skills, the user can enable, disable, or configure them
 - [ ] FR-04: Given OpenCode skills, the installed list matches what OpenCode reports
+- [ ] FR-05: Given the skills catalog, the user can configure multiple remote registries as skill sources
+- [ ] FR-06: Given an installed skill, the system syncs its status to the OpenCode server
 - [ ] FR-09: Given a skill definition, it is a SKILL.md file with YAML frontmatter and a valid name (1-64 lowercase alphanumeric with hyphens)
 - [ ] FR-10: Given an installed skill with a newer version available, re-installing offers conflict resolution (skip or overwrite)
+- [ ] NFR-01: Given a skills catalog scan, stale or outdated results are ignored and not shown in the UI
+- [ ] NFR-02: Given catalog loading, the UI remains responsive and does not block during the fetch

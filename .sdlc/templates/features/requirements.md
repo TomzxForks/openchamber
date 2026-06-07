@@ -37,6 +37,10 @@ Order rows by priority: Must first, then Should, then May.
 
 ## Acceptance Criteria
 
+Every FR and NFR shall have at least one acceptance criterion.
+
+Order criteria by FRs first (sorted by ID), then NFRs (sorted by ID).
+
 - [ ] FR-01: <Testable condition>
 
 ## Open Questions

@@ -34,6 +34,8 @@ Users can pin important sessions for quick access and perform bulk operations (a
 
 - [ ] FR-01: Given a session, the user can pin it and it appears in a pinned section
 - [ ] FR-02: Given the session list, shift-click selects a range of sessions
+- [ ] FR-03: Given the session list, clicking checkboxes selects individual sessions and shift-click on checkboxes extends the selection
 - [ ] FR-04: Given selected sessions, the bulk action bar shows archive and delete options
 - [ ] FR-05: Given a pinned session, it remains pinned after page reload
+- [ ] FR-06: Given selected sessions and a target folder, the bulk action bar includes a "Move to folder" option that moves them
 - [ ] FR-07: Given any number of sessions pinned, all are persisted to localStorage without limit

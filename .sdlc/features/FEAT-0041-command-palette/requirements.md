@@ -49,4 +49,7 @@ OpenChamber provides a keyboard-activated command palette with fuzzy search for 
 - [ ] FR-03: Given a partial filename, fuzzy search shows matching files
 - [ ] FR-04: Given a partial branch name, fuzzy search shows matching branches
 - [ ] FR-05: Given a settings page name, selecting it navigates to that page
+- [ ] FR-06: Given the command palette open, typing an action command name executes that action
+- [ ] FR-07: Given the command palette open, arrow keys move focus between results and Escape closes the palette
 - [ ] FR-08: Given the default state, Cmd+P (macOS) / Ctrl+P (Linux/Windows) opens the palette; given a custom shortcut, the new shortcut opens the palette instead
+- [ ] NFR-01: Given a project with 500+ searchable items, fuzzy search results appear within 100ms of keystroke

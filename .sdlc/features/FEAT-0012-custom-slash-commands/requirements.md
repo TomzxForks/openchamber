@@ -33,6 +33,8 @@ Users can define custom slash commands with name, description, agent, model, tem
 - [ ] FR-01: Given the commands settings page, the user creates a new command with a template
 - [ ] FR-02: Given a project-scoped command, it only appears in that project's autocomplete
 - [ ] FR-03: Given custom commands, typing `/` in chat shows them alongside built-in commands
+- [ ] FR-04: Given an existing custom command, the user can edit its name, description, template, agent, or model; the user can also delete it
+- [ ] FR-05: Given a slash command message, the original command text carries a message ID for undo/redo tracking
 - [ ] FR-06: Given a custom command template, it is rendered as plain markdown with no variable substitution
 - [ ] FR-07: Given the commands UI, no marketplace, sharing, or download option is available
 

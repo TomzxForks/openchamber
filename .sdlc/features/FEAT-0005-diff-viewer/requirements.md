@@ -52,3 +52,9 @@ OpenChamber provides a full-screen diff viewer for inspecting code changes. It s
 - [ ] FR-05: Given an assistant tool call with a file diff, the diff renders inline in the chat message
 - [ ] FR-08: Given a diff with mixed CRLF/LF line endings, it renders without errors
 - [ ] FR-10: Given a merge conflict diff, the system shows standard two-parent diff only; three-way visualization is not available
+- [ ] FR-03: Given a large changeset with many files, individual file diffs can be expanded and collapsed
+- [ ] FR-06: Given an image diff (before/after), the viewer shows a side-by-side comparison
+- [ ] FR-07: Given a diff view, the user can add inline comment drafts on specific lines
+- [ ] FR-09: Given a diffed file, the user can copy the file contents or delete the file from the diff view
+- [ ] NFR-01: Given a changeset with 100+ files, the diff viewer renders without UI freeze
+- [ ] NFR-02: Given a changeset with 100+ files, per-file diff content loads lazily as the user scrolls

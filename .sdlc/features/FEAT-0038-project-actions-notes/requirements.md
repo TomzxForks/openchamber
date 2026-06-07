@@ -53,6 +53,11 @@ OpenChamber provides project-level productivity tools: project actions for runni
 - [ ] FR-03: Given todo items, the user can drag to reorder them
 - [ ] FR-04: Given a todo item, clicking "Send to session" creates a prompt from it
 - [ ] FR-05: Given a scheduled task with a cron expression, it fires at the specified times
+- [ ] FR-06: Given a todo item, the user can create a worktree from it
+- [ ] FR-07: Given a project with npm scripts or project configuration, dev server URLs are auto-detected
+- [ ] FR-08: Given a project, the user can set a custom icon via upload or automatic favicon discovery
 - [ ] FR-09: Given a cron expression with a timezone, scheduling respects the IANA timezone and supports daily, weekly, once, and cron kinds
 - [ ] FR-10: Given a scheduled task, the user can target a specific agent, model, provider, and variant
+- [ ] NFR-01: Given a scheduled task with a cron expression, it executes reliably with proper error handling
+- [ ] NFR-02: Given resized context panels for notes and todos, panel sizes are remembered across sessions
 

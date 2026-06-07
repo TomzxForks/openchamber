@@ -37,5 +37,7 @@ Full localization system supporting 7 locales (English, Simplified Chinese, Span
 - [ ] FR-02: Given a browser set to Korean, the app defaults to Korean on first use
 - [ ] FR-03: Given a locale preference, it persists after app restart
 - [ ] FR-04: Given a locale switch, the UI updates without page reload
+- [ ] FR-05: Given a failed locale load due to network error, the system retries loading automatically
+- [ ] FR-06: Given a locale file that fails to load entirely, the system defaults to English
 - [ ] FR-07: Given a new TypeScript locale file registered in store.ts, the locale appears without a formal contribution process
 - [ ] FR-08: Given a locale with missing keys, the system displays English text for those keys

@@ -62,3 +62,11 @@ OpenChamber provides a full file explorer and inline editor within the app. User
 - [ ] FR-13: Given a file exceeding 200,000 characters, when opened inline, the content is truncated
 - [ ] FR-14: Given a file over 500KB, when previewed, a "large file preview limited" warning is displayed
 - [ ] FR-15: Given a file attachment exceeding 50MB, when attached, the upload is rejected
+- [ ] FR-07: Given a JSON file opened, its contents are displayed in a collapsible tree view
+- [ ] FR-08: Given an image file (PNG, JPG, SVG, GIF) selected, it renders inline in the editor pane
+- [ ] FR-09: Given an open file, the user can add inline comment drafts and send them to the agent
+- [ ] FR-11: Given a file is loading, when the user navigates to a different file, the stale load is ignored and the new file opens
+- [ ] FR-12: Given the file tree with git changes, files with diffs show a preview option that opens the diff
+- [ ] NFR-01: Given a file save that fails (disk full, permissions), the user is shown an error and the edit content is not discarded
+- [ ] NFR-02: Given a file with 10,000+ lines, opening and scrolling is responsive without noticeable lag
+- [ ] NFR-03: Given a save is in progress, when the user switches to another file, the save completes and the user is notified before the switch

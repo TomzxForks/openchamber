@@ -32,6 +32,9 @@ A multi-project workspace system where users add, rename, reorder, and customize
 
 - [ ] FR-01: Given the project list, the user adds a project by selecting a directory
 - [ ] FR-02: Given multiple projects, each has its own session list and git state
+- [ ] FR-03: Given an existing project, the user can rename, reorder, or delete it
 - [ ] FR-04: Given a project with an icon, the sidebar shows the icon
+- [ ] FR-05: Given a project, the user can upload a custom icon or the system discovers one from the project's favicon
 - [ ] FR-06: Given a repository URL, the user can clone it as a new project
+- [ ] FR-07: Given multiple projects, the user can drag to reorder them
 

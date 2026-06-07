@@ -33,6 +33,8 @@ A floating context menu that appears when users select text in chat messages, of
 - [ ] FR-01: Given text selected in a chat message, a context menu appears
 - [ ] FR-02: Given the context menu, clicking "Add to notes" adds the selection as a distilled insight
 - [ ] FR-03: Given the context menu, it appears near the selected text
+- [ ] FR-04: Given text selection on desktop or mobile, the context menu appears in both cases
+- [ ] FR-05: Given selected text added to chat, it is wrapped in markdown fenced code blocks
 - [ ] FR-06: Given the context menu, the available actions are fixed and cannot be customized by the user
 - [ ] FR-07: Given a large text selection, the full selection is processed without truncation
 

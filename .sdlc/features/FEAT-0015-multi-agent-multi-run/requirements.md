@@ -49,4 +49,8 @@ OpenChamber supports running multiple AI agents in parallel from a single prompt
 - [ ] FR-03: Given completed multi-run results, the fusion view shows a unified comparison
 - [ ] FR-04: Given optional isolation is disabled, agents share the same working directory
 - [ ] FR-05: Given a non-Git project, multi-run uses directory-level isolation instead of worktrees
+- [ ] FR-06: Given the Agent Manager UI, the user can select multiple models for a parallel multi-run
+- [ ] FR-07: Given a multi-run configuration, the user can set a model limit to cap costs per run
+- [ ] NFR-01: Given 3 concurrent agent runs, one agent failing does not interrupt or affect the other two
+- [ ] NFR-02: Given 3 agents streaming output concurrently, the UI scrolls and updates without noticeable jank or stutter
 - [ ] NFR-03: Given a run group with 5 models, each gets its own isolated session and worktree; given a 6th model, the system rejects the run

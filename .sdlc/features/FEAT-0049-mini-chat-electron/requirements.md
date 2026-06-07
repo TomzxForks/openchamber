@@ -37,5 +37,7 @@ A compact, always-on-top mini chat window for the Electron desktop app that prov
 - [ ] FR-02: Given a repositioned mini chat, it opens at the same position next time
 - [ ] FR-03: Given an active session in the main window, the mini chat can continue it
 - [ ] FR-04: Given the keyboard shortcut, the mini chat toggles visibility
+- [ ] FR-05: Given the mini chat window, dragging it to a screen edge docks it to that edge
+- [ ] FR-06: Given the mini chat is open, it shows only the chat input and response area without chrome
 - [ ] FR-07: Given the main window is closed, the mini chat cannot function independently
 - [ ] FR-08: Given multiple mini chat windows, each displays one session with no tabs

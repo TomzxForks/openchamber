@@ -53,3 +53,7 @@ OpenChamber provides 18+ built-in themes with light/dark variants and supports c
 - [ ] FR-04: Given any UI component, no hardcoded color values are present in its code
 - [ ] FR-08: Given a custom theme JSON file missing required fields (id, name, variant), when loaded, the theme is skipped and a console warning is shown
 - [ ] NFR-02: Given a custom theme file exceeding 512KB, when loaded, the file is rejected
+- [ ] FR-05: Given the theming settings, the user can configure font size, spacing, corner radius, and layout, and changes apply immediately
+- [ ] FR-06: Given a custom icon set in the SVG sprite, the UI renders the custom icons in place of defaults
+- [ ] FR-07: Given a VS Code theme JSON file, when imported, it is converted to an OpenChamber theme and appears in the theme picker
+- [ ] NFR-01: Given any two themes, when the user switches between them, the transition is instant with no flash of unstyled content

@@ -52,7 +52,11 @@ OpenChamber tracks AI provider usage metrics including rate limits, token consum
 - [ ] FR-03: Given usage data over time, pace indicators predict exhaustion time
 - [ ] FR-04: Given a quota reset time, it displays in the user's local timezone
 - [ ] FR-05: Given multiple configured providers, usage is tracked per provider
+- [ ] FR-06: Given non-finite quota percentages, the UI renders them gracefully without glitches
+- [ ] FR-07: Given a provider with multiple models, per-model usage breakdowns are displayed
 - [ ] FR-08: Given any of the 14 supported providers, quota data is tracked and displayed
 - [ ] FR-09: Given usage data, only the current period is shown with no historical aggregation
+- [ ] NFR-01: Given missing or malformed quota data, the UI handles it gracefully without errors
+- [ ] NFR-02: Given active usage data polling, streaming performance is not degraded
 
 

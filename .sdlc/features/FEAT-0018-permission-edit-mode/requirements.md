@@ -33,9 +33,12 @@ A permission request/response system where the AI asks for user approval before 
 ## Acceptance Criteria
 
 - [ ] FR-01: Given an AI tool call requiring permission, a card appears with approve/deny buttons
+- [ ] FR-02: Given a permission card, clicking approve grants the action; clicking deny rejects it
 - [ ] FR-03: Given auto-accept enabled, permissions are automatically approved
 - [ ] FR-04: Given a permission request while the app is in the background, a toast appears
 - [ ] FR-05: Given a file write permission, the card shows a preview of the changes
+- [ ] FR-06: Given a session tree, enabling auto-accept on the parent session also auto-approves permissions for child sessions
+- [ ] FR-07: Given edit mode enabled, the UI applies distinct visual color coding to differentiate it from read-only mode
 - [ ] FR-08: Given a new agent with no explicit rules, runtime permission checks fall back to 'ask'; given a new agent's global default, it is set to 'allow'
 - [ ] FR-09: Given permission changes for an agent, they persist across sessions via OpenCode config layers; given a session, auto-accept can be toggled independently
 

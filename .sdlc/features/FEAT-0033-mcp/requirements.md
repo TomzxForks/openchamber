@@ -49,8 +49,11 @@ OpenChamber supports Model Context Protocol (MCP) server configuration, allowing
 - [ ] FR-01: Given the MCP settings page, the user can add a new MCP server with URL and auth config
 - [ ] FR-02: Given configured MCP servers, the user can edit or remove them
 - [ ] FR-03: Given MCP servers, the status dropdown shows connected/error/disabled for each
+- [ ] FR-04: Given configured MCP servers, a quick-access dropdown in the header shows their connection status
 - [ ] FR-05: Given an MCP server requiring OAuth, the user can authenticate via the callback flow
 - [ ] FR-06: Given MCP configurations, the user can export to JSON and import from JSON
+- [ ] FR-07: Given MCP servers on the local network, the system discovers them automatically
 - [ ] FR-08: Given a local MCP server, it runs via command on the local machine; given a remote server, it connects via HTTP/SSE
 - [ ] FR-09: Given a JSON config snippet, the user can import MCP server configurations without a built-in catalog
+- [ ] NFR-01: Given an MCP server connection failure, the app continues running and other features are not blocked
 

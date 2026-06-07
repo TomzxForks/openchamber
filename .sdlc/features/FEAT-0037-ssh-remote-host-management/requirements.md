@@ -35,7 +35,10 @@ Full SSH connection manager in the Electron desktop app: configure SSH instances
 - [ ] FR-01: Given the remote instances settings, the user adds an SSH host with credentials
 - [ ] FR-02: Given a configured host, the user can connect and disconnect
 - [ ] FR-03: Given connected remote instances, the host switcher shows local and remote options
+- [ ] FR-04: Given an SSH connection, the user can configure local, remote, or dynamic port forwarding
 - [ ] FR-05: Given a fresh remote host, the system offers to install OpenChamber
+- [ ] FR-06: Given an existing SSH config file, the user can import it into the connection manager
+- [ ] FR-07: Given an active SSH connection, health status and connection logs are displayed
 - [ ] FR-08: Given an SSH connection, agent forwarding is supported via the -A flag
 - [ ] FR-09: Given multiple SSH hosts, connections can be active simultaneously and managed independently
 

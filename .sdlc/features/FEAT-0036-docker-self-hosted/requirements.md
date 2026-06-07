@@ -33,6 +33,8 @@ Production-ready Docker deployment with multi-stage build, docker-compose config
 - [ ] FR-01: Given the Dockerfile, `docker build` produces a working image
 - [ ] FR-02: Given docker-compose up, the container starts with persistent data volumes
 - [ ] FR-03: Given environment variables, the container configures password, tunnel, and OpenCode connection
+- [ ] FR-04: Given the Dockerfile, cloudflared is included for tunnel support inside the container
+- [ ] FR-05: Given container startup, OpenCode CLI is auto-installed inside the container
 - [ ] FR-06: Given the Caddyfile, HTTPS termination works with the reverse proxy
 - [ ] FR-08: Given the Dockerfile and docker-compose.yml, the user can build locally; no official Docker images are published
 

@@ -55,7 +55,15 @@ The Electron desktop app (packages/electron/) is the forward desktop runtime for
 - [ ] FR-01: Given the app launches, the web server starts in-process and the UI loads
 - [ ] FR-02: Given the app is running, the macOS menu bar shows OpenChamber actions
 - [ ] FR-03: Given a new release on GitHub, the app detects, downloads, and applies the update
+- [ ] FR-04: Given a deep link URL for a project or session, the app opens the correct resource
 - [ ] FR-05: Given the Mini Chat is opened, it shows a compact session view independent of the main window
 - [ ] FR-06: Given SSH credentials, the app connects to a remote OpenChamber instance
+- [ ] FR-07: Given multiple projects, the user opens them in separate windows for parallel workflows
+- [ ] FR-08: Given a file or folder, the user opens it in Finder, Terminal, or preferred editor via "Open In"
 - [ ] FR-09: Given first launch, the app shows a directory picker to select a workspace
+- [ ] FR-10: Given a system notification event, the app displays it via the desktop notification callback
+- [ ] FR-11: Given Windows or Linux, the app runs with platform-appropriate menus and behavior
 - [ ] FR-12: Given a Tauri installation, the Electron update is packaged as a Tauri-compatible .app.tar.gz and auto-updates in-place
+- [ ] NFR-01: Given the macOS build, the app is notarized with hardened runtime enabled
+- [ ] NFR-02: Given app startup, the splash window appears before the server is ready
+- [ ] NFR-03: Given the app is resized and repositioned, it opens at the same window state on next launch

@@ -53,3 +53,9 @@ OpenChamber provides a comprehensive settings interface with 19 pages covering a
 - [ ] FR-04: Given a provider API key change, the OpenCode server receives the update
 - [ ] FR-09: Given settings are modified, when the app restarts, they persist from OPENCHAMBER_DATA_DIR/settings.json
 - [ ] FR-10: Given a settings section with modified values, when the user triggers reset-to-default, only that section's values are restored
+- [ ] FR-05: Given the Shortcuts settings page, the user can view, modify, and reset keyboard shortcuts
+- [ ] FR-06: Given a display width larger than 1200px, the settings dialog opens in a windowed layout instead of fullscreen
+- [ ] FR-07: Given the settings sidebar, the user can resize it and navigate using keyboard and screen reader
+- [ ] FR-08: Given the settings page, the user can export settings to a file and import settings from a file
+- [ ] NFR-01: Given the settings dialog, all interactive elements are reachable via keyboard Tab and screen reader announcements are correct
+- [ ] NFR-02: Given the settings sidebar, related pages are grouped into collapsible sections

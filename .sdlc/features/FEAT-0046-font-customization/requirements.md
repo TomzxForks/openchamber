@@ -37,5 +37,7 @@ Users can customize the font family and size used throughout the application via
 - [ ] FR-02: Given the font settings, the user adjusts the font size
 - [ ] FR-03: Given a font preference, it persists after app restart
 - [ ] FR-04: Given a font change, all views update immediately
+- [ ] FR-05: Given the font settings panel is open, adjusting the font size slider shows the text changing in real time
+- [ ] FR-06: Given a modified font setting, clicking "Reset to defaults" restores original font family and size
 - [ ] FR-07: Given the font settings, monospace and proportional fonts are configured separately with a dedicated terminal font size
 - [ ] FR-08: Given font size input outside 50%-200% (main) or 9-52px (terminal), the value is clamped to the valid range

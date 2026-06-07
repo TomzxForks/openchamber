@@ -33,7 +33,10 @@ Cron-based task scheduling that triggers AI prompts automatically at specified t
 
 - [ ] FR-01: Given the scheduled tasks dialog, the user creates a task with a cron expression
 - [ ] FR-02: Given a scheduled task, the user can disable it without deleting it
+- [ ] FR-03: Given a scheduled task, it respects the configured timezone and locale-aware settings including weekday names
 - [ ] FR-04: Given a scheduled task fires, an AI session starts with the configured prompt
+- [ ] FR-05: Given the scheduled tasks dialog, a task editor with cron visualization is provided
+- [ ] FR-06: Given the desktop app quitting, scheduled task shutdown is coordinated to prevent interruption
 - [ ] FR-07: Given a missed scheduled task, it is silently skipped without catch-up; tasks only fire while the server is running
 - [ ] FR-08: Given a scheduled task, the user can target a specific agent and model via execution configuration
 

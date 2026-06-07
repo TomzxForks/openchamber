@@ -51,4 +51,10 @@ OpenChamber supports Cloudflare tunnels for remote access, enabling users to con
 - [ ] FR-03: Given a connect link, after one use, the link is invalidated
 - [ ] FR-04: Given an active tunnel, the user can stop it via CLI or API
 - [ ] FR-05: Given a managed-remote profile, the user can start a tunnel with a specific hostname and token
+- [ ] FR-06: Given a remote access URL, the system prompts for a UI password before granting access
+- [ ] FR-07: Given an active tunnel, starting a second tunnel is rejected; at most one tunnel is active per instance
+- [ ] FR-08: Given a provider registry, an additional tunnel provider can be registered and used for tunnel creation
 - [ ] FR-09: Given a configured provider (Cloudflare or ngrok), the system creates a tunnel using the provider registry with the appropriate mode
+- [ ] NFR-01: Given a one-time connect link, after first use the link is revoked; generating a new link revokes the previous unused one
+- [ ] NFR-02: Given an active tunnel, replacing or stopping it revokes existing connect links and invalidates remote sessions
+- [ ] NFR-03: Given a running tunnel process, if it crashes the system detects the failure and restarts it automatically

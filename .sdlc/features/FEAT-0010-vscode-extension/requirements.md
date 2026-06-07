@@ -52,3 +52,8 @@ OpenChamber ships as a VS Code extension that embeds the shared UI in a sidebar 
 - [ ] FR-04: Given the Agent Manager, the user can start a multi-model run from the sidebar
 - [ ] FR-05: Given an active session, the user can open it in an editor panel alongside code
 - [ ] FR-06: Given a dark VS Code theme, the OpenChamber UI adapts its colors accordingly
+- [ ] FR-07: Given VS Code settings are configured for API URL and binary path, the extension reads and applies these settings on startup
+- [ ] FR-08: Given the VS Code sidebar width is resized, the extension webview layout adapts accordingly without horizontal scroll
+- [ ] NFR-01: Given an SSE connection from the extension, when the webview is closed or reloaded, all listeners are cleaned up and reconnection does not leak resources
+- [ ] NFR-02: Given the extension starts before the API server is ready, it retries the connection with bounded intervals until the API responds
+- [ ] NFR-03: Given the extension is installed but the webview is not visible, it does not consume noticeable CPU or memory in the editor

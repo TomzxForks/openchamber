@@ -48,5 +48,8 @@ The context panel provides detailed visibility into session resource usage and r
 - [ ] FR-02: Given a session with messages, statistics show count, cost, and per-role breakdown
 - [ ] FR-03: Given individual messages, each shows its token consumption
 - [ ] FR-04: Given the JSON inspector, raw message data is viewable in formatted JSON
+- [ ] FR-05: Given a session with messages, the context panel shows a breakdown by role
+- [ ] FR-06: Given an active session, the header shows a compact context usage percentage indicator
 - [ ] FR-07: Given a session with messages, cost estimates are client-side approximations without server-side validation
 - [ ] FR-08: Given multiple sessions, cost data is shown only for the current session with no cross-session totals
+- [ ] NFR-01: Given a streaming session, the context panel does not re-render on every delta; updates are batched at the flush interval

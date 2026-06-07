@@ -51,5 +51,11 @@ OpenChamber can embed a live preview of running dev servers within the app. The 
 - [ ] FR-02: Given the preview, the URL bar shows the current URL with reload and external open buttons
 - [ ] FR-03: Given a preview with same-origin fetch calls, they are proxied correctly
 - [ ] FR-04: Given the console overlay, browser logs appear with filter and copy controls
+- [ ] FR-05: Given inspect mode is active, clicking a page element highlights it and captures its coordinates for annotation
+- [ ] FR-06: Given the console overlay, the user can attach selected log entries to the active chat session
 - [ ] FR-07: Given a project with a dev server action, the preview auto-opens the detected URL
+- [ ] FR-08: Given the Electron desktop app, the embedded browser tab shows with full URL bar, navigation controls, and inspect mode
+- [ ] FR-09: Given an annotation is captured, the system saves a screenshot with the annotation overlay
 - [ ] FR-10: Given a package.json with a "dev" or "start" script, the system detects the dev server regardless of framework
+- [ ] NFR-01: Given a dev server preview in an iframe, the embedded page cannot access OpenChamber's cookies or localStorage
+- [ ] NFR-02: Given a project without a dev server script, activating the preview does not launch any project action

@@ -34,6 +34,8 @@ A library of pre-built, customizable AI prompt templates organized by group (Git
 - [ ] FR-01: Given the magic prompts settings, 30+ prompts are available in groups
 - [ ] FR-02: Given a prompt, the user can edit its instruction template
 - [ ] FR-03: Given the settings, the user can hide prompts from quick actions
+- [ ] FR-04: Given the settings page, all prompt templates are listed organized by group
+- [ ] FR-05: Given a planning prompt, the user can configure its behavior
 - [ ] FR-06: Given staged changes, commit generation uses a magic prompt template
 - [ ] FR-08: Given an existing prompt template, the user can override it; creating entirely new prompt IDs is not supported
 - [ ] FR-09: Given a new app release, default templates are shipped and user overrides are layered on top

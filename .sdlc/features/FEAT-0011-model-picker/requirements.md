@@ -37,7 +37,9 @@ An organized model selection UI that categorizes available models by provider, s
 - [ ] FR-03: Given the model picker, recently used models appear in a dedicated section
 - [ ] FR-04: Given a model, the user can hide it from future display
 - [ ] FR-05: Given the model picker, typing filters models by name
+- [ ] FR-06: Given a session, the selected model persists when switching away and back; given an agent, the selected model persists across conversations
 - [ ] FR-07: Given configured favorites, a keyboard shortcut cycles through them
+- [ ] FR-08: Given the model picker, each model displays a cost indicator and capability icons
 - [ ] FR-09: Given the model picker, model capabilities and pricing are fetched from the models.dev API; given an unsupported provider, data is derived from OpenCode SDK provider data instead
 
 ## Constraints

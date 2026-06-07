@@ -33,4 +33,5 @@ Interactive question cards rendered in the chat when the AI needs user input. Su
 - [ ] FR-02: Given a question card, submitting a response sends it to the AI
 - [ ] FR-03: Given a question card, copy buttons produce Markdown and JSON output
 - [ ] FR-04: Given a single-choice question, only one option can be selected
+- [ ] FR-05: Given a pending question card, switching to another session and back preserves the question and the draft response
 - [ ] FR-06: Given a question of each type (text, radio, checkbox, file path), the correct input widget is rendered and submission works

@@ -33,7 +33,9 @@ Expandable/collapsible rendering of AI reasoning/thinking and justification bloc
 - [ ] FR-01: Given a response with reasoning, it renders as a collapsible block
 - [ ] FR-02: Given a collapsed reasoning block, a summary preview is visible
 - [ ] FR-03: Given expand/collapse, the animation is smooth without layout shift
+- [ ] FR-04: Given multiple reasoning blocks in a turn, they are merged into a single per-turn view
 - [ ] FR-05: Given the chat settings, the user can toggle reasoning visibility
+- [ ] FR-06: Given the model selector, the user can navigate thinking mode options using keyboard
 - [ ] FR-07: Given a reasoning block, the full text is rendered without truncation after sanitization
 
 ## Constraints

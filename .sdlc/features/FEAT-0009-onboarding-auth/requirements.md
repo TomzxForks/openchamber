@@ -53,3 +53,7 @@ OpenChamber provides a first-run onboarding flow that guides users through choos
 - [ ] FR-05: Given a UI password is set, unauthenticated requests are rejected
 - [ ] FR-06: Given a connection failure during onboarding, the recovery screen offers retry options
 - [ ] FR-09: Given a user on a new device, when authenticating, they must register a new passkey; credentials from other devices are not available
+- [ ] FR-07: Given an Electron desktop with a failed remote connection, the recovery flow guides the user through re-authentication
+- [ ] FR-08: Given a tunnel connection, the onboarding screen displays a QR code that a mobile device can scan to connect
+- [ ] NFR-01: Given passkey registration, the system uses WebAuthn with public key cryptography; no password is transmitted or stored on the server
+- [ ] NFR-02: Given a UI password is configured, the server validates the password before serving the SPA; unauthenticated requests receive HTTP 401

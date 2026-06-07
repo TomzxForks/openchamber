@@ -35,7 +35,10 @@ A comprehensive mobile adaptation layer including edge-swipe to open session swi
 - [ ] FR-01: Given a mobile device, chat controls are usable with touch
 - [ ] FR-02: Given a mobile keyboard appearing, the UI adjusts without overlapping input
 - [ ] FR-03: Given edge-swipe from left, the session switcher opens
+- [ ] FR-04: Given a dialog or settings panel on mobile, it opens as an overlay panel
 - [ ] FR-05: Given mobile keyboard mode setting, the user can choose resize or overlay behavior
+- [ ] FR-06: Given a mobile device, a session status bar is visible with relevant information
+- [ ] FR-07: Given a touch target on mobile, it meets minimum finger-sized interaction dimensions
 - [ ] FR-08: Given touch input, the system uses web-standard APIs with no iOS/Android branching
 - [ ] FR-09: Given PWA orientation settings, the user can select system, portrait, or landscape
 

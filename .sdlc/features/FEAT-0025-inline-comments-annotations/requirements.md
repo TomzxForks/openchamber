@@ -34,8 +34,11 @@ Users can create, edit, and delete inline comments anchored to specific lines in
 
 - [ ] FR-01: Given a diff view, the user can click a line and add an inline comment
 - [ ] FR-02: Given a file editor, the user can add a comment on any line
+- [ ] FR-03: Given a plan section, the user can add an inline comment on any line
 - [ ] FR-04: Given a session with comments, they persist after navigation and return
 - [ ] FR-05: Given comments on a diff, the user can send them as context to the AI
+- [ ] FR-06: Given the diff viewer, comment overlays are rendered on the relevant lines
+- [ ] FR-07: Given the file editor, comments are rendered as CodeMirror widgets on annotated lines
 - [ ] FR-08: Given an inline comment, the user can create, edit, or delete it but cannot resolve or address it
 - [ ] FR-09: Given comments in a session, they are not visible or accessible from other sessions
 

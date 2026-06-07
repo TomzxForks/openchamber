@@ -48,6 +48,9 @@ OpenChamber provides a dedicated Plan/Build mode with a markdown-based plan edit
 - [ ] FR-02: Given a plan with markdown, toggling preview renders formatted HTML
 - [ ] FR-03: Given a plan, clicking "Send to session" submits it as a prompt
 - [ ] FR-04: Given a plan with actionable items, the user can create a worktree from an item
+- [ ] FR-05: Given a plan section, the user can add an inline comment draft on that section
 - [ ] FR-06: Given a plan, the user can save it as a file in the project
+- [ ] FR-07: Given a plan, the user can associate it with a specific session for context
 - [ ] FR-08: Given a plan editor, the user writes free-form markdown with no enforced template structure
 - [ ] FR-09: Given a saved plan file, any session in the project can access it and import it
+- [ ] NFR-01: Given a large plan (50+ sections), the editor remains responsive via CodeMirror virtualization
