@@ -31,6 +31,7 @@ OpenChamber supports browser push notifications, desktop (Electron) notification
 | FR-08 | Should | The system shall support a setting to disable OpenCode update notifications. |
 | FR-09 | Should | The system shall suppress inherited subagent completion notifications. |
 | FR-10 | May | The system shall support web push (VAPID) for PWA background notifications. |
+| FR-11 | Must | The system shall persist push subscriptions indefinitely on disk, removing them only on HTTP 410/404 or explicit user unsubscribe. |
 
 ## Non-Functional Requirements
 
@@ -38,6 +39,7 @@ OpenChamber supports browser push notifications, desktop (Electron) notification
 |---|---|---|---|
 | NFR-01 | Must | Reliability | Duplicate notifications shall be suppressed across panels and tabs. |
 | NFR-02 | Should | Privacy | Notification content shall not expose sensitive code in the system notification area. |
+| NFR-03 | Should | Capacity | Each UI session token shall be limited to 10 push subscriptions. |
 
 ## Constraints
 
@@ -54,8 +56,5 @@ OpenChamber supports browser push notifications, desktop (Electron) notification
 - [ ] FR-04: Given multiple browser tabs, activity indicators update across all tabs
 - [ ] FR-05: Given a new OpenCode version available, the user can trigger the upgrade from within the app
 - [ ] FR-06: Given an update prompt dismissed, it does not reappear on the next visit
-
-## Open Questions
-
-1. How long are push notification subscriptions maintained?
-2. Is there a notification history or log?
+- [ ] FR-11: Given a push subscription, when the server returns HTTP 410, the subscription is removed from disk
+- [ ] NFR-03: Given a UI session token with 10 existing push subscriptions, when an 11th is registered, it is rejected

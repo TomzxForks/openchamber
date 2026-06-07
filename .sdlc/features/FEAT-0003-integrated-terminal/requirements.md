@@ -36,6 +36,7 @@ OpenChamber includes a fully integrated terminal emulator within the app UI, sup
 | NFR-01 | Must | Reliability | WebSocket connections shall be cleaned up reliably during shutdown and reconnects. |
 | NFR-02 | Must | Reliability | Idle WebSocket connections shall be cleaned up to prevent resource leaks. |
 | NFR-03 | Should | Performance | Terminal viewport shall stay above the mobile keyboard on touch devices. |
+| NFR-04 | Must | Capacity | The system shall support up to 20 concurrent terminal sessions; requests exceeding this limit shall receive HTTP 429. |
 
 ## Constraints
 
@@ -51,8 +52,4 @@ OpenChamber includes a fully integrated terminal emulator within the app UI, sup
 - [ ] FR-03: Given UTF-8 output (e.g., git log with non-ASCII characters), the terminal renders correctly
 - [ ] FR-04: Given Ctrl+C is pressed, the running process receives SIGINT
 - [ ] FR-05: Given multiple terminal tabs, each maintains its own PTY session
-
-## Open Questions
-
-1. What is the maximum number of concurrent terminal sessions supported?
-2. Are there plans for terminal split panes?
+- [ ] NFR-04: Given 20 active terminal sessions, when a 21st session is requested, the response returns HTTP 429

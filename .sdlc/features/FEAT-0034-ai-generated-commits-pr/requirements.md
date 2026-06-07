@@ -26,14 +26,17 @@ AI-powered generation of commit messages (subject + highlights) and PR descripti
 | FR-04 | Must | The system shall support one-click insert of generated content into commit input or PR form. |
 | FR-05 | Should | The system shall display AI-generated highlights alongside commit messages. |
 | FR-06 | Should | The system shall show a visual result card for generated content. |
+| FR-07 | Must | The system shall use the current session's configured model for generation without a dedicated hardcoded model. |
+| FR-08 | Should | The system shall allow full customization of generation prompts via Settings with server-side persistence. |
 
 ## Acceptance Criteria
 
 - [ ] FR-01: Given staged changes, clicking "Generate" produces a commit message
 - [ ] FR-02: Given a branch with commits ahead, clicking "Generate" produces a PR description
 - [ ] FR-04: Given generated content, clicking "Insert" fills the commit input or PR form
+- [ ] FR-07: Given a session with a configured model, generation uses that model without a dedicated hardcoded model
+- [ ] FR-08: Given Settings > Magic Prompts, the user can customize generation prompts and overrides are persisted server-side
 
-## Open Questions
+## Constraints
 
-1. What model is used for generation?
-2. Can users customize the generation prompt?
+_No technical constraints remaining._

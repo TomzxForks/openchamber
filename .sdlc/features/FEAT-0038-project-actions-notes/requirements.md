@@ -28,6 +28,8 @@ OpenChamber provides project-level productivity tools: project actions for runni
 | FR-06 | Should | The system shall support creating worktrees from todo items. |
 | FR-07 | Should | The system shall support auto-detection of dev server URLs from npm scripts or project configuration. |
 | FR-08 | May | The system shall support per-project custom icons with upload and automatic favicon discovery. |
+| FR-09 | Must | The system shall support standard 5-field cron expressions with timezone-aware scheduling (IANA timezone strings) and schedule kinds: daily, weekly, once, and cron. |
+| FR-10 | Must | The system shall allow scheduled tasks to target specific agents, models, providers, and variants. |
 
 ## Non-Functional Requirements
 
@@ -43,6 +45,7 @@ OpenChamber provides project-level productivity tools: project actions for runni
 - Scheduled tasks use cron expressions parsed by `cron-parser`
 - Scheduled tasks runtime lives in `packages/web/server/lib/scheduled-tasks/`
 
+
 ## Acceptance Criteria
 
 - [ ] FR-01: Given a project with a dev server action, clicking it starts the server
@@ -50,8 +53,6 @@ OpenChamber provides project-level productivity tools: project actions for runni
 - [ ] FR-03: Given todo items, the user can drag to reorder them
 - [ ] FR-04: Given a todo item, clicking "Send to session" creates a prompt from it
 - [ ] FR-05: Given a scheduled task with a cron expression, it fires at the specified times
+- [ ] FR-09: Given a cron expression with a timezone, scheduling respects the IANA timezone and supports daily, weekly, once, and cron kinds
+- [ ] FR-10: Given a scheduled task, the user can target a specific agent, model, provider, and variant
 
-## Open Questions
-
-1. What cron expression features are supported?
-2. Can scheduled tasks target specific agents or models?

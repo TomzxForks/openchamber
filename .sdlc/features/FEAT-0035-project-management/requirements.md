@@ -35,7 +35,3 @@ A multi-project workspace system where users add, rename, reorder, and customize
 - [ ] FR-04: Given a project with an icon, the sidebar shows the icon
 - [ ] FR-06: Given a repository URL, the user can clone it as a new project
 
-## Open Questions
-
-1. Is there a maximum number of projects?
-2. Can project configurations be exported/imported?

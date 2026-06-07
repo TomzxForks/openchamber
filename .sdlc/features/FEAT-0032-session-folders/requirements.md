@@ -34,7 +34,3 @@ Users can organize sessions into named, nested folders per project. Folders supp
 - [ ] FR-03: Given sessions and folders, the user can drag to reorder them
 - [ ] FR-06: Given a folder whose sessions are all deleted, it is cleaned up
 
-## Open Questions
-
-1. Is there a maximum nesting depth?
-2. Can folders be shared across projects?

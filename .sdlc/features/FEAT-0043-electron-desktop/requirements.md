@@ -32,6 +32,7 @@ The Electron desktop app (packages/electron/) is the forward desktop runtime for
 | FR-09 | Should | The system shall support workspace-first startup flow with directory picker. |
 | FR-10 | Should | The system shall support system notifications via desktop notification callback. |
 | FR-11 | May | The system shall support Windows and Linux (on roadmap). |
+| FR-12 | Must | The system shall support in-place migration from Tauri to Electron by packaging the Electron app into a Tauri-compatible format for auto-update. |
 
 ## Non-Functional Requirements
 
@@ -47,6 +48,7 @@ The Electron desktop app (packages/electron/) is the forward desktop runtime for
 - Builds are distributed as DMG and ZIP for macOS (arm64)
 - The preload script exposes `__TAURI__` IPC shim for backward compatibility with shared UI
 - Notarization requires an Apple Developer certificate
+- Tauri-to-Electron migration is documented in docs/TAURI_TO_ELECTRON_CUTOVER.md
 
 ## Acceptance Criteria
 
@@ -56,8 +58,4 @@ The Electron desktop app (packages/electron/) is the forward desktop runtime for
 - [ ] FR-05: Given the Mini Chat is opened, it shows a compact session view independent of the main window
 - [ ] FR-06: Given SSH credentials, the app connects to a remote OpenChamber instance
 - [ ] FR-09: Given first launch, the app shows a directory picker to select a workspace
-
-## Open Questions
-
-1. When will Windows and Linux support ship?
-2. What is the migration plan for Tauri users to Electron?
+- [ ] FR-12: Given a Tauri installation, the Electron update is packaged as a Tauri-compatible .app.tar.gz and auto-updates in-place

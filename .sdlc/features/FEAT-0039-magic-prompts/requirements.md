@@ -26,6 +26,8 @@ A library of pre-built, customizable AI prompt templates organized by group (Git
 | FR-04 | Must | The system shall provide a dedicated settings page for prompt management. |
 | FR-05 | Should | The system shall support configurable planning prompts. |
 | FR-06 | Should | The system shall power git commit and PR generation via magic prompts. |
+| FR-08 | Must | The system shall allow overriding existing prompt templates without supporting creation of entirely new prompt IDs. |
+| FR-09 | Must | The system shall ship default templates with each release and layer user overrides on top. |
 
 ## Acceptance Criteria
 
@@ -33,8 +35,9 @@ A library of pre-built, customizable AI prompt templates organized by group (Git
 - [ ] FR-02: Given a prompt, the user can edit its instruction template
 - [ ] FR-03: Given the settings, the user can hide prompts from quick actions
 - [ ] FR-06: Given staged changes, commit generation uses a magic prompt template
+- [ ] FR-08: Given an existing prompt template, the user can override it; creating entirely new prompt IDs is not supported
+- [ ] FR-09: Given a new app release, default templates are shipped and user overrides are layered on top
 
-## Open Questions
+## Constraints
 
-1. Can users create entirely new prompt templates?
-2. Are magic prompts versioned with the app?
+- Prompt IDs are hardcoded

@@ -27,6 +27,7 @@ OpenChamber provides a keyboard-activated command palette with fuzzy search for 
 | FR-05 | Must | The system shall support navigating to settings pages. |
 | FR-06 | Should | The system shall support executing action commands (new session, toggle panel, etc.). |
 | FR-07 | Should | The system shall support keyboard navigation within the palette (arrow keys, enter, escape). |
+| FR-08 | Must | The system shall use Cmd+P (macOS) / Ctrl+P (Linux/Windows) as the default keyboard shortcut, with customization support. |
 
 ## Non-Functional Requirements
 
@@ -40,6 +41,7 @@ OpenChamber provides a keyboard-activated command palette with fuzzy search for 
 - Fuzzy search uses `fuse.js`
 - Palette activation via configurable keyboard shortcut
 
+
 ## Acceptance Criteria
 
 - [ ] FR-01: Given the keyboard shortcut, the command palette opens
@@ -47,8 +49,4 @@ OpenChamber provides a keyboard-activated command palette with fuzzy search for 
 - [ ] FR-03: Given a partial filename, fuzzy search shows matching files
 - [ ] FR-04: Given a partial branch name, fuzzy search shows matching branches
 - [ ] FR-05: Given a settings page name, selecting it navigates to that page
-
-## Open Questions
-
-1. What is the default keyboard shortcut?
-2. Can users add custom commands to the palette?
+- [ ] FR-08: Given the default state, Cmd+P (macOS) / Ctrl+P (Linux/Windows) opens the palette; given a custom shortcut, the new shortcut opens the palette instead

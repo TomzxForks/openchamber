@@ -27,6 +27,8 @@ Full SSH connection manager in the Electron desktop app: configure SSH instances
 | FR-05 | Should | The system shall support auto-installing OpenChamber on remote hosts. |
 | FR-06 | Should | The system shall support SSH config file import. |
 | FR-07 | Should | The system shall display connection health and logs. |
+| FR-08 | Must | The system shall support SSH agent forwarding via the -A flag. |
+| FR-09 | Must | The system shall support multiple simultaneous SSH connections, each managed independently. |
 
 ## Acceptance Criteria
 
@@ -34,8 +36,9 @@ Full SSH connection manager in the Electron desktop app: configure SSH instances
 - [ ] FR-02: Given a configured host, the user can connect and disconnect
 - [ ] FR-03: Given connected remote instances, the host switcher shows local and remote options
 - [ ] FR-05: Given a fresh remote host, the system offers to install OpenChamber
+- [ ] FR-08: Given an SSH connection, agent forwarding is supported via the -A flag
+- [ ] FR-09: Given multiple SSH hosts, connections can be active simultaneously and managed independently
 
-## Open Questions
+## Constraints
 
-1. Is SSH agent forwarding supported?
-2. Can multiple SSH connections be active simultaneously?
+_No technical constraints remaining._

@@ -27,6 +27,8 @@ A permission request/response system where the AI asks for user approval before 
 | FR-05 | Should | The system shall show file write/create tool previews in permission cards. |
 | FR-06 | Should | The system shall support auto-approve scoped to session tree (parent auto-accepts for children). |
 | FR-07 | Should | The system shall display edit mode with visual color coding. |
+| FR-08 | Must | The system shall default new agents to 'allow' as the global permission action, with runtime fallback to 'ask' when no explicit rules are configured. |
+| FR-09 | Must | The system shall persist permissions at the agent level via OpenCode config layers and support per-session auto-accept toggling. |
 
 ## Acceptance Criteria
 
@@ -34,8 +36,9 @@ A permission request/response system where the AI asks for user approval before 
 - [ ] FR-03: Given auto-accept enabled, permissions are automatically approved
 - [ ] FR-04: Given a permission request while the app is in the background, a toast appears
 - [ ] FR-05: Given a file write permission, the card shows a preview of the changes
+- [ ] FR-08: Given a new agent with no explicit rules, runtime permission checks fall back to 'ask'; given a new agent's global default, it is set to 'allow'
+- [ ] FR-09: Given permission changes for an agent, they persist across sessions via OpenCode config layers; given a session, auto-accept can be toggled independently
 
-## Open Questions
+## Constraints
 
-1. What are the default permission levels for new sessions?
-2. Can permission settings be configured globally?
+- Permissions are configured via OpenCode config layers

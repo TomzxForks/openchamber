@@ -28,6 +28,7 @@ An organized model selection UI that categorizes available models by provider, s
 | FR-06 | Should | The system shall persist model selection per-session and per-agent. |
 | FR-07 | Should | The system shall support favorite-model cycling via keyboard shortcuts. |
 | FR-08 | Should | The system shall display model cost indicators and capability icons. |
+| FR-09 | Must | The system shall source model capabilities and pricing data from the models.dev API via a server-side proxy, with fallback derivation from OpenCode SDK provider data for unsupported providers. |
 
 ## Acceptance Criteria
 
@@ -37,8 +38,8 @@ An organized model selection UI that categorizes available models by provider, s
 - [ ] FR-04: Given a model, the user can hide it from future display
 - [ ] FR-05: Given the model picker, typing filters models by name
 - [ ] FR-07: Given configured favorites, a keyboard shortcut cycles through them
+- [ ] FR-09: Given the model picker, model capabilities and pricing are fetched from the models.dev API; given an unsupported provider, data is derived from OpenCode SDK provider data instead
 
-## Open Questions
+## Constraints
 
-1. How are model capabilities and pricing data sourced?
-2. Is there a maximum number of favorites?
+- Model data is fetched from the models.dev API via a server-side proxy endpoint

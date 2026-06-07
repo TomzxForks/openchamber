@@ -29,6 +29,7 @@ OpenChamber can embed a live preview of running dev servers within the app. The 
 | FR-07 | Should | The system shall auto-detect dev server URLs from project actions. |
 | FR-08 | May | The system shall provide a full embedded browser tab on Electron desktop with URL bar, navigation, and inspect mode. |
 | FR-09 | May | The system shall support annotation screenshots from the preview. |
+| FR-10 | Must | The system shall auto-detect dev servers based on package.json script name patterns, not specific frameworks. |
 
 ## Non-Functional Requirements
 
@@ -42,6 +43,7 @@ OpenChamber can embed a live preview of running dev servers within the app. The 
 - Preview runs in a sandboxed iframe with proxy middleware on the server
 - URL rewriting handles absolute same-origin paths and WebSocket upgrade URLs
 - Electron browser tab uses Electron's webview or BrowserView API
+- Dev server auto-detection is based on package.json script name patterns (dev, start, preview, serve, develop); the proxy handles Vite/HMR and webpack-dev-server
 
 ## Acceptance Criteria
 
@@ -50,8 +52,4 @@ OpenChamber can embed a live preview of running dev servers within the app. The 
 - [ ] FR-03: Given a preview with same-origin fetch calls, they are proxied correctly
 - [ ] FR-04: Given the console overlay, browser logs appear with filter and copy controls
 - [ ] FR-07: Given a project with a dev server action, the preview auto-opens the detected URL
-
-## Open Questions
-
-1. What dev server frameworks are auto-detected?
-2. Is there support for multiple simultaneous previews?
+- [ ] FR-10: Given a package.json with a "dev" or "start" script, the system detects the dev server regardless of framework

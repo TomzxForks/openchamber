@@ -27,6 +27,8 @@ Users can create, edit, and delete inline comments anchored to specific lines in
 | FR-05 | Must | The system shall support consuming comments (appending to chat input). |
 | FR-06 | Should | The system shall render comment overlays on the Pierre diff viewer. |
 | FR-07 | Should | The system shall use CodeMirror widgets for editor comments. |
+| FR-08 | Must | The system shall support create, edit, and delete actions on comments; resolve/address state is not supported. |
+| FR-09 | Must | The system shall scope comments to the current session with no cross-session sharing. |
 
 ## Acceptance Criteria
 
@@ -34,8 +36,7 @@ Users can create, edit, and delete inline comments anchored to specific lines in
 - [ ] FR-02: Given a file editor, the user can add a comment on any line
 - [ ] FR-04: Given a session with comments, they persist after navigation and return
 - [ ] FR-05: Given comments on a diff, the user can send them as context to the AI
+- [ ] FR-08: Given an inline comment, the user can create, edit, or delete it but cannot resolve or address it
+- [ ] FR-09: Given comments in a session, they are not visible or accessible from other sessions
 
-## Open Questions
-
-1. Can comments be resolved or marked as addressed?
-2. Are comments shared across sessions?
+## Constraints

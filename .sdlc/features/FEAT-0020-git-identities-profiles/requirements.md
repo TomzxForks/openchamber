@@ -26,6 +26,7 @@ Multiple git identity profiles (name + email + auth type + SSH key) that users c
 | FR-04 | Must | The system shall support gitmoji in commit messages. |
 | FR-05 | Should | The system shall support SSH key selection per identity. |
 | FR-06 | Should | The system shall cache gitmojis locally with TTL. |
+| FR-07 | Must | The system shall store identity profiles centrally and support applying them globally or per-project. |
 
 ## Acceptance Criteria
 
@@ -33,8 +34,8 @@ Multiple git identity profiles (name + email + auth type + SSH key) that users c
 - [ ] FR-02: Given a project, the user selects a specific git identity for it
 - [ ] FR-03: Given existing git config, the system discovers and offers existing credentials
 - [ ] FR-04: Given gitmoji enabled, the commit input shows a gitmoji picker
+- [ ] FR-07: Given an identity profile, the user can apply it globally or select it for a specific project
 
-## Open Questions
+## Constraints
 
-1. Can identities be shared across projects?
-2. Is GPG signing supported per identity?
+- Identity profiles are stored in OpenCode config layers

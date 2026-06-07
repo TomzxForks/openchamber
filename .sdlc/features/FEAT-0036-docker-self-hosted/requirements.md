@@ -26,6 +26,7 @@ Production-ready Docker deployment with multi-stage build, docker-compose config
 | FR-04 | Must | The system shall include cloudflared for tunnel support inside the container. |
 | FR-05 | Should | The system shall auto-install OpenCode CLI inside the container. |
 | FR-06 | Should | The system shall provide a Caddy reverse proxy configuration for HTTPS. |
+| FR-08 | Must | The system shall provide a Dockerfile and docker-compose.yml for local builds; no official Docker images are published. |
 
 ## Acceptance Criteria
 
@@ -33,8 +34,8 @@ Production-ready Docker deployment with multi-stage build, docker-compose config
 - [ ] FR-02: Given docker-compose up, the container starts with persistent data volumes
 - [ ] FR-03: Given environment variables, the container configures password, tunnel, and OpenCode connection
 - [ ] FR-06: Given the Caddyfile, HTTPS termination works with the reverse proxy
+- [ ] FR-08: Given the Dockerfile and docker-compose.yml, the user can build locally; no official Docker images are published
 
-## Open Questions
+## Constraints
 
-1. Are there official Docker images published?
-2. Is Kubernetes deployment supported?
+_No technical constraints remaining._

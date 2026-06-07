@@ -32,6 +32,9 @@ OpenChamber provides a full file explorer and inline editor within the app. User
 | FR-10 | Should | The system shall support clickable file paths in chat messages that open the file at the referenced line. |
 | FR-11 | Should | The system shall preserve pending navigation and ignore stale file loads. |
 | FR-12 | May | The system shall support file diff preview from the file tree when git changes exist. |
+| FR-13 | Must | The system shall truncate files exceeding 200,000 characters in inline editing/viewing. |
+| FR-14 | Should | The system shall display a warning when previewing files over 500KB. |
+| FR-15 | Must | The system shall cap file attachment size at 50MB. |
 
 ## Non-Functional Requirements
 
@@ -56,8 +59,6 @@ OpenChamber provides a full file explorer and inline editor within the app. User
 - [ ] FR-05: Given an open file, Go To Line navigates to the specified line
 - [ ] FR-06: Given a `.md` file, preview mode renders formatted markdown
 - [ ] FR-10: Given a chat message with `src/foo.ts:42`, clicking it opens the file at line 42
-
-## Open Questions
-
-1. What is the maximum file size supported for inline editing?
-2. Are there plans for collaborative file editing?
+- [ ] FR-13: Given a file exceeding 200,000 characters, when opened inline, the content is truncated
+- [ ] FR-14: Given a file over 500KB, when previewed, a "large file preview limited" warning is displayed
+- [ ] FR-15: Given a file attachment exceeding 50MB, when attached, the upload is rejected

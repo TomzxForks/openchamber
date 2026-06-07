@@ -57,8 +57,3 @@ OpenChamber provides a full Git sidebar and GitHub-native workflows inside the a
 - [ ] FR-05: Given an open PR, the UI shows CI check status and merge button
 - [ ] FR-06: Given a GitHub issue, the user can start a session with the issue body as context
 - [ ] FR-07: Given a dirty worktree, the user can stash, sync, and pop stash
-
-## Open Questions
-
-1. What is the maximum repository size tested for reliable git operations?
-2. Are there plans for GitLab or Bitbucket support?

@@ -28,12 +28,14 @@ OpenChamber provides 18+ built-in themes with light/dark variants and supports c
 | FR-05 | Should | The system shall support configurable font size, spacing, corner radius, and layout controls. |
 | FR-06 | Should | The system shall support custom icons via the SVG sprite system. |
 | FR-07 | May | The system shall support importing themes from other editors (e.g., VS Code themes). |
+| FR-08 | Must | The system shall validate custom themes on load, checking required metadata fields (id, name, variant), color sections, and tokens; invalid themes shall be skipped with a console warning. |
 
 ## Non-Functional Requirements
 
 | ID | Priority | Category | Requirement |
 |---|---|---|---|
 | NFR-01 | Must | Performance | Theme switching shall be instant with no visible flash of unstyled content. |
+| NFR-02 | Should | Capacity | Custom theme file size shall be limited to 512KB. |
 
 ## Constraints
 
@@ -41,6 +43,7 @@ OpenChamber provides 18+ built-in themes with light/dark variants and supports c
 - Theme tokens are defined in `packages/ui/src/lib/theme/`
 - Components must never use Tailwind color classes directly
 - Custom theme files use JSON format with defined schema
+- Themes are loaded from `~/.config/openchamber/themes/` as local JSON files only; no catalog or marketplace
 
 ## Acceptance Criteria
 
@@ -48,8 +51,5 @@ OpenChamber provides 18+ built-in themes with light/dark variants and supports c
 - [ ] FR-02: Given a custom theme JSON file in the themes directory, it appears in the theme picker
 - [ ] FR-03: Given a custom theme file is modified, the UI updates without restart
 - [ ] FR-04: Given any UI component, no hardcoded color values are present in its code
-
-## Open Questions
-
-1. Is there a theme schema validator or linter?
-2. Are community themes shared via a catalog or only manually?
+- [ ] FR-08: Given a custom theme JSON file missing required fields (id, name, variant), when loaded, the theme is skipped and a console warning is shown
+- [ ] NFR-02: Given a custom theme file exceeding 512KB, when loaded, the file is rejected

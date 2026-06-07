@@ -33,8 +33,3 @@ Export any chat session (including sub-agent sessions) as a structured Markdown 
 - [ ] FR-02: Given an exported file, timestamps and model info are present
 - [ ] FR-03: Given a session with sub-agents, the export includes their messages nested
 - [ ] FR-04: Given desktop, the native save dialog opens; given web, the file downloads
-
-## Open Questions
-
-1. Are there other export formats planned (JSON, HTML)?
-2. Is there a batch export for multiple sessions?

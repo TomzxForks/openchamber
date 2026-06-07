@@ -28,6 +28,8 @@ OpenChamber tracks AI provider usage metrics including rate limits, token consum
 | FR-05 | Should | The system shall support usage tracking across multiple providers (OpenRouter, Wafer.ai, etc.). |
 | FR-06 | Should | The system shall guard against non-finite quota percentages to prevent UI glitches. |
 | FR-07 | May | The system shall support model family breakdowns within a provider. |
+| FR-08 | Must | The system shall support quota tracking for the following providers: openai/codex, claude (anthropic), google, github-copilot, github-copilot-addon, kimi-for-coding, nano-gpt, openrouter, zai-coding-plan, zhipuai-coding-plan, minimax-coding-plan, minimax-cn-coding-plan, ollama-cloud, wafer. |
+| FR-09 | Must | The system shall display current period usage data only, with no historical aggregation. |
 
 ## Non-Functional Requirements
 
@@ -41,6 +43,7 @@ OpenChamber tracks AI provider usage metrics including rate limits, token consum
 - Quota data comes from provider-specific APIs via server-side quota modules
 - Provider modules live in `packages/web/server/lib/quota/`
 - Usage display uses progress bars, cards, and pace indicators
+- Each provider fetches live snapshots
 
 ## Acceptance Criteria
 
@@ -49,8 +52,7 @@ OpenChamber tracks AI provider usage metrics including rate limits, token consum
 - [ ] FR-03: Given usage data over time, pace indicators predict exhaustion time
 - [ ] FR-04: Given a quota reset time, it displays in the user's local timezone
 - [ ] FR-05: Given multiple configured providers, usage is tracked per provider
+- [ ] FR-08: Given any of the 14 supported providers, quota data is tracked and displayed
+- [ ] FR-09: Given usage data, only the current period is shown with no historical aggregation
 
-## Open Questions
 
-1. Which providers are supported for quota tracking?
-2. Is historical usage data available or only current period?

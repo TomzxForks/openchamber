@@ -26,6 +26,10 @@ Full localization system supporting 7 locales (English, Simplified Chinese, Span
 | FR-04 | Must | The system shall support runtime locale switching without restart. |
 | FR-05 | Should | The system shall retry failed locale loads. |
 | FR-06 | Should | The system shall default to English for missing translations. |
+| FR-07 | Should | The system shall accept new translations by editing TypeScript locale files without a formal contribution process or translation management UI. |
+| FR-08 | Must | The system shall fall back to English for missing translation keys. |
+
+## Constraints
 
 ## Acceptance Criteria
 
@@ -33,8 +37,5 @@ Full localization system supporting 7 locales (English, Simplified Chinese, Span
 - [ ] FR-02: Given a browser set to Korean, the app defaults to Korean on first use
 - [ ] FR-03: Given a locale preference, it persists after app restart
 - [ ] FR-04: Given a locale switch, the UI updates without page reload
-
-## Open Questions
-
-1. How are new translations contributed?
-2. Are all settings pages fully translated?
+- [ ] FR-07: Given a new TypeScript locale file registered in store.ts, the locale appears without a formal contribution process
+- [ ] FR-08: Given a locale with missing keys, the system displays English text for those keys

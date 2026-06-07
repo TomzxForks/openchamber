@@ -52,8 +52,3 @@ OpenChamber ships as a VS Code extension that embeds the shared UI in a sidebar 
 - [ ] FR-04: Given the Agent Manager, the user can start a multi-model run from the sidebar
 - [ ] FR-05: Given an active session, the user can open it in an editor panel alongside code
 - [ ] FR-06: Given a dark VS Code theme, the OpenChamber UI adapts its colors accordingly
-
-## Open Questions
-
-1. Are there plans for inline code suggestions (like Copilot) in addition to chat?
-2. What is the minimum webview API version required?

@@ -28,6 +28,7 @@ Create, manage, and delete git worktrees from the UI. Each worktree has its own 
 | FR-06 | Should | The system shall support branch renaming and deletion from the worktree UI. |
 | FR-07 | Should | The system shall support instant draft-first worktree creation. |
 | FR-08 | Should | The system shall support creating worktrees from PR heads, reusing existing local branches. |
+| FR-09 | Must | The system shall allow checkout with uncommitted changes, show dirty-change warnings on deletion, provide guided conflict handling for commit integration, and support stash management. |
 
 ## Acceptance Criteria
 
@@ -36,8 +37,8 @@ Create, manage, and delete git worktrees from the UI. Each worktree has its own 
 - [ ] FR-03: Given a worktree, the user can delete it and its session is cleaned up
 - [ ] FR-05: Given multiple worktrees, the Agent Group view shows them organized by branch
 - [ ] FR-08: Given a PR, creating a worktree reuses the existing local branch if it matches
+- [ ] FR-09: Given a worktree with uncommitted changes, checkout is allowed; given deletion of a dirty worktree, a warning is shown; given a merge conflict, guided conflict handling is provided
 
-## Open Questions
+## Constraints
 
-1. How are worktree conflicts (uncommitted changes) handled?
-2. Is there a limit on concurrent worktrees?
+- Git worktree operations are performed via the `simple-git` library

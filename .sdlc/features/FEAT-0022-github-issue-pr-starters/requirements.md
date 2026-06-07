@@ -27,6 +27,13 @@ Dialogs that let users pick a GitHub issue or pull request and automatically sta
 | FR-05 | Should | The system shall support entering issue/PR by URL or number. |
 | FR-06 | Should | The system shall load PR description, comments, and check status as context. |
 | FR-07 | Should | The system shall support fork-aware issue/PR listing. |
+| FR-08 | Must | The system shall scope issue/PR browsing to the directory's git remote and its fork network. |
+
+## Non-Functional Requirements
+
+| ID | Priority | Category | Requirement |
+|---|---|---|---|
+| NFR-01 | Should | Reliability | The system shall rely on GitHub API rate limits (5,000 req/hr for authenticated users) without explicit client-side rate limiting. |
 
 ## Acceptance Criteria
 
@@ -35,8 +42,9 @@ Dialogs that let users pick a GitHub issue or pull request and automatically sta
 - [ ] FR-03: Given a selected issue, a new session starts with the issue body as context
 - [ ] FR-04: Given a selected PR, the user can create a worktree from its branch
 - [ ] FR-05: Given an issue URL, the picker resolves it to the correct issue
+- [ ] FR-08: Given the issue/PR picker, only repos in the directory's git remote fork network are shown
+- [ ] NFR-01: Given authenticated GitHub API usage, the system operates within GitHub's rate limits without additional client-side throttling
 
-## Open Questions
+## Constraints
 
-1. Are there rate limits on GitHub API calls for issue/PR browsing?
-2. Can users start sessions from issues across different repositories?
+- GitHub routes use standard Octokit calls with per_page: 50

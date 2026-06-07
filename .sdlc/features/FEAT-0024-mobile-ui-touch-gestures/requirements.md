@@ -27,6 +27,8 @@ A comprehensive mobile adaptation layer including edge-swipe to open session swi
 | FR-05 | Should | The system shall support mobile keyboard mode preference (resize/overlay). |
 | FR-06 | Should | The system shall provide mobile-specific session status bar. |
 | FR-07 | Should | The system shall optimize touch targets for finger-sized interactions. |
+| FR-08 | Must | The system shall use web-standard touch gesture APIs without platform-specific branching, detecting mobile via pointer type and viewport width. |
+| FR-09 | Should | The system shall support configurable PWA orientation (system, portrait, landscape) via settings. |
 
 ## Acceptance Criteria
 
@@ -34,8 +36,9 @@ A comprehensive mobile adaptation layer including edge-swipe to open session swi
 - [ ] FR-02: Given a mobile keyboard appearing, the UI adjusts without overlapping input
 - [ ] FR-03: Given edge-swipe from left, the session switcher opens
 - [ ] FR-05: Given mobile keyboard mode setting, the user can choose resize or overlay behavior
+- [ ] FR-08: Given touch input, the system uses web-standard APIs with no iOS/Android branching
+- [ ] FR-09: Given PWA orientation settings, the user can select system, portrait, or landscape
 
-## Open Questions
+## Constraints
 
-1. Are there platform-specific gesture differences (iOS vs Android)?
-2. Is landscape mode fully supported?
+- Mobile is detected via pointer type and viewport width (768px breakpoint)

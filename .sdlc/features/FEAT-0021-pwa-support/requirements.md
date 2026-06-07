@@ -27,6 +27,7 @@ Installable Progressive Web App with service worker for push notifications and o
 | FR-05 | Should | The system shall sync the PWA manifest with recent session shortcuts. |
 | FR-06 | Should | The system shall adapt layout for window controls overlay mode. |
 | FR-07 | Should | The system shall support configurable install orientation. |
+| FR-08 | Must | The system shall support cached-shell offline mode only; full offline mode is out of scope. |
 
 ## Acceptance Criteria
 
@@ -34,8 +35,6 @@ Installable Progressive Web App with service worker for push notifications and o
 - [ ] FR-02: Given the PWA is closed, push notifications still appear
 - [ ] FR-03: Given the install prompt, dismissing it prevents repeated prompts
 - [ ] FR-04: Given the PWA is in standalone mode, the UI adapts (no browser chrome)
+- [ ] FR-08: Given the PWA is offline, only the cached shell is available; full functionality requires a server connection
 
-## Open Questions
-
-1. What offline capabilities are supported (full offline, cached shell only)?
-2. How are service worker updates deployed?
+## Constraints

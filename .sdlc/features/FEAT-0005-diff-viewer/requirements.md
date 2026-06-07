@@ -29,6 +29,7 @@ OpenChamber provides a full-screen diff viewer for inspecting code changes. It s
 | FR-07 | Should | The system shall support inline comment drafts on diff lines. |
 | FR-08 | Should | The system shall handle multi-file tool diffs with mixed line endings safely. |
 | FR-09 | May | The system shall support copy/delete actions on diffed files. |
+| FR-10 | Should | The system shall support standard two-parent diffs; three-way merge diff visualization is not supported. |
 
 ## Non-Functional Requirements
 
@@ -50,8 +51,4 @@ OpenChamber provides a full-screen diff viewer for inspecting code changes. It s
 - [ ] FR-04: Given a diff with syntax-highlighted code, added lines show green and removed lines show red
 - [ ] FR-05: Given an assistant tool call with a file diff, the diff renders inline in the chat message
 - [ ] FR-08: Given a diff with mixed CRLF/LF line endings, it renders without errors
-
-## Open Questions
-
-1. Is there a maximum diff size before truncation?
-2. Are three-way merge diffs supported?
+- [ ] FR-10: Given a merge conflict diff, the system shows standard two-parent diff only; three-way visualization is not available

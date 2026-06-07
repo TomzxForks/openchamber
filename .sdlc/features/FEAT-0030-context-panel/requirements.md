@@ -27,6 +27,8 @@ The context panel provides detailed visibility into session resource usage and r
 | FR-04 | Must | The system shall provide a raw message JSON inspector for viewing the exact data sent to and received from the AI. |
 | FR-05 | Should | The system shall display context breakdown by role (user, assistant, tool, other). |
 | FR-06 | Should | The system shall show a header-level context usage indicator (compact percentage). |
+| FR-07 | Should | The system shall display client-side cost approximations based on model pricing data; no server-side authoritative cost calculation is provided. |
+| FR-08 | Should | The system shall scope cost data to the current session only without cross-session aggregation. |
 
 ## Non-Functional Requirements
 
@@ -37,7 +39,7 @@ The context panel provides detailed visibility into session resource usage and r
 ## Constraints
 
 - Token counts come from OpenCode SSE events
-- Cost estimates are calculated client-side based on model pricing
+- Cost estimates are calculated client-side based on model pricing data from models.dev
 - The context panel opens as a tab in the context panel overlay
 
 ## Acceptance Criteria
@@ -46,8 +48,5 @@ The context panel provides detailed visibility into session resource usage and r
 - [ ] FR-02: Given a session with messages, statistics show count, cost, and per-role breakdown
 - [ ] FR-03: Given individual messages, each shows its token consumption
 - [ ] FR-04: Given the JSON inspector, raw message data is viewable in formatted JSON
-
-## Open Questions
-
-1. Are cost estimates accurate for all providers, or are they approximations?
-2. Is there a cumulative cost view across all sessions?
+- [ ] FR-07: Given a session with messages, cost estimates are client-side approximations without server-side validation
+- [ ] FR-08: Given multiple sessions, cost data is shown only for the current session with no cross-session totals

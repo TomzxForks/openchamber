@@ -26,6 +26,9 @@ Users can pin important sessions for quick access and perform bulk operations (a
 | FR-04 | Must | The system shall provide a bulk action bar with archive and delete actions. |
 | FR-05 | Should | The system shall preserve pinned state across reloads. |
 | FR-06 | Should | The system shall support bulk move to folder. |
+| FR-07 | Must | The system shall support an unlimited number of pinned sessions persisted to localStorage. |
+
+## Constraints
 
 ## Acceptance Criteria
 
@@ -33,8 +36,4 @@ Users can pin important sessions for quick access and perform bulk operations (a
 - [ ] FR-02: Given the session list, shift-click selects a range of sessions
 - [ ] FR-04: Given selected sessions, the bulk action bar shows archive and delete options
 - [ ] FR-05: Given a pinned session, it remains pinned after page reload
-
-## Open Questions
-
-1. Is there a maximum number of pinned sessions?
-2. Can pinned sessions be reordered?
+- [ ] FR-07: Given any number of sessions pinned, all are persisted to localStorage without limit

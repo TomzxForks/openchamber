@@ -29,6 +29,7 @@ OpenChamber supports Cloudflare tunnels for remote access, enabling users to con
 | FR-06 | Should | The system shall enforce UI password protection for remote access. |
 | FR-07 | Should | The system shall support at most one active tunnel per running instance. |
 | FR-08 | May | The system shall support additional tunnel providers beyond Cloudflare. |
+| FR-09 | Must | The system shall support tunnel providers via a provider registry, with Cloudflare (quick, managed-remote, managed-local) and ngrok (beta, quick tunnel) as implemented providers. |
 
 ## Non-Functional Requirements
 
@@ -40,8 +41,6 @@ OpenChamber supports Cloudflare tunnels for remote access, enabling users to con
 
 ## Constraints
 
-- Only one active tunnel per running instance (port)
-- Cloudflare is the only supported tunnel provider currently
 - `cloudflared` binary must be available on the host or in the Docker image
 - Tunnel tokens and connect links are stored in server memory (not persisted across restarts)
 
@@ -52,8 +51,4 @@ OpenChamber supports Cloudflare tunnels for remote access, enabling users to con
 - [ ] FR-03: Given a connect link, after one use, the link is invalidated
 - [ ] FR-04: Given an active tunnel, the user can stop it via CLI or API
 - [ ] FR-05: Given a managed-remote profile, the user can start a tunnel with a specific hostname and token
-
-## Open Questions
-
-1. What additional tunnel providers are planned?
-2. Is there a plan for persistent connect tokens (non-one-time)?
+- [ ] FR-09: Given a configured provider (Cloudflare or ngrok), the system creates a tunnel using the provider registry with the appropriate mode

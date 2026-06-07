@@ -26,6 +26,7 @@ Expandable/collapsible rendering of AI reasoning/thinking and justification bloc
 | FR-04 | Should | The system shall merge reasoning blocks into a per-turn view. |
 | FR-05 | Should | The system shall support a user toggle for showing/hiding reasoning by default. |
 | FR-06 | Should | The system shall support keyboard navigation for thinking mode in model selector. |
+| FR-07 | Must | The system shall render reasoning blocks in full without truncation, applying sanitization only. |
 
 ## Acceptance Criteria
 
@@ -33,8 +34,8 @@ Expandable/collapsible rendering of AI reasoning/thinking and justification bloc
 - [ ] FR-02: Given a collapsed reasoning block, a summary preview is visible
 - [ ] FR-03: Given expand/collapse, the animation is smooth without layout shift
 - [ ] FR-05: Given the chat settings, the user can toggle reasoning visibility
+- [ ] FR-07: Given a reasoning block, the full text is rendered without truncation after sanitization
 
-## Open Questions
+## Constraints
 
-1. Is there a maximum reasoning block length before truncation?
-2. Can reasoning blocks be exported?
+- The cleanReasoningText function sanitizes reasoning text but does not truncate

@@ -71,3 +71,6 @@ The project solves the problem of OpenCode being terminal-only by adding rich vi
 | Multi-run | Running multiple AI agents in parallel from a single prompt |
 | Skills | Reusable automation packages that extend agent behavior |
 | HMR | Hot Module Replacement during development via Vite |
+| Global Hub | Shared upstream SSE hub (`global-hub.js`) that fans out OpenCode events to server-side and browser subscribers |
+| Event Pipeline | Client-side SSE/WS processing layer in `packages/ui/src/sync/` that dispatches events to Zustand stores |
+| Upstream Reader | Reusable SSE reader (`upstream-reader.js`) with stall detection, event-id tracking, and automatic reconnect |

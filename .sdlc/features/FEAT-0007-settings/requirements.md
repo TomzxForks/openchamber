@@ -29,6 +29,8 @@ OpenChamber provides a comprehensive settings interface with 19 pages covering a
 | FR-06 | Should | The system shall provide a windowed settings view for larger displays. |
 | FR-07 | Should | The system shall support resizable settings navigation with keyboard and screen-reader support. |
 | FR-08 | May | The system shall support importing and exporting settings. |
+| FR-09 | Must | The system shall store settings per-machine in OPENCHAMBER_DATA_DIR/settings.json. |
+| FR-10 | Should | The system shall provide reset-to-default actions per settings section. |
 
 ## Non-Functional Requirements
 
@@ -39,7 +41,7 @@ OpenChamber provides a comprehensive settings interface with 19 pages covering a
 
 ## Constraints
 
-- Settings are stored server-side via OpenCode config
+- OpenCode SDK provides per-project config via `opencode.json`, but OpenChamber's own settings are machine-level
 - Settings UI uses shared primitives from `packages/ui/src/components/sections/shared/`
 - Each settings section is a separate component under `packages/ui/src/components/sections/`
 
@@ -49,8 +51,5 @@ OpenChamber provides a comprehensive settings interface with 19 pages covering a
 - [ ] FR-02: Given a setting change, it persists after app restart
 - [ ] FR-03: Given each settings page, the relevant options are present and functional
 - [ ] FR-04: Given a provider API key change, the OpenCode server receives the update
-
-## Open Questions
-
-1. Are settings per-user or per-machine?
-2. Is there a settings reset/defaults feature?
+- [ ] FR-09: Given settings are modified, when the app restarts, they persist from OPENCHAMBER_DATA_DIR/settings.json
+- [ ] FR-10: Given a settings section with modified values, when the user triggers reset-to-default, only that section's values are restored

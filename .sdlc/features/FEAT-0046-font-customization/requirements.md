@@ -26,6 +26,10 @@ Users can customize the font family and size used throughout the application via
 | FR-04 | Must | The system shall apply font changes globally without restart. |
 | FR-05 | Should | The system shall preview font changes in real time. |
 | FR-06 | Should | The system shall provide a reset-to-default option. |
+| FR-07 | Must | The system shall support separate configuration of monospace and proportional fonts, with a dedicated terminal font size. |
+| FR-08 | Must | The system shall clamp main font size to 50%-200% and terminal font size to 9-52px. |
+
+## Constraints
 
 ## Acceptance Criteria
 
@@ -33,8 +37,5 @@ Users can customize the font family and size used throughout the application via
 - [ ] FR-02: Given the font settings, the user adjusts the font size
 - [ ] FR-03: Given a font preference, it persists after app restart
 - [ ] FR-04: Given a font change, all views update immediately
-
-## Open Questions
-
-1. Are monospace and proportional fonts separately configurable?
-2. Is there a maximum or minimum font size?
+- [ ] FR-07: Given the font settings, monospace and proportional fonts are configured separately with a dedicated terminal font size
+- [ ] FR-08: Given font size input outside 50%-200% (main) or 9-52px (terminal), the value is clamped to the valid range

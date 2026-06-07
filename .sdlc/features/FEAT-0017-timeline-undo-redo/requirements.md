@@ -27,6 +27,8 @@ A timeline dialog showing all messages in a session chronologically, allowing us
 | FR-05 | Should | The system shall support full-text search across all messages in the timeline. |
 | FR-06 | Should | The system shall support keyboard turn navigation (arrow keys). |
 | FR-07 | Should | The system shall use deferred/staged rendering for large timelines. |
+| FR-08 | Should | The system shall support undo/redo with no explicit depth limit, bounded only by the number of user messages in the session. |
+| FR-09 | Must | The system shall restrict undo/redo to the chat session timeline without creating or modifying git commits. |
 
 ## Acceptance Criteria
 
@@ -35,8 +37,9 @@ A timeline dialog showing all messages in a session chronologically, allowing us
 - [ ] FR-03: Given a timeline, clicking fork on message N creates a new branch from that point
 - [ ] FR-04: Given a conversation with undo history, redo restores the previously undone turn
 - [ ] FR-05: Given the timeline dialog, search filters messages by content
+- [ ] FR-08: Given a session with N user messages, the user can undo up to N times without hitting a depth limit
+- [ ] FR-09: Given undo/redo actions, no git commits are created or modified as a side effect
 
-## Open Questions
+## Constraints
 
-1. Is there a limit on undo/redo depth?
-2. Are undo/redo operations reflected in the git history?
+- Undo/redo operates on the chat session timeline only

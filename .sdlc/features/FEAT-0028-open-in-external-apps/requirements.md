@@ -25,14 +25,17 @@ Users can configure a preferred external application (from a catalog of 23+ supp
 | FR-03 | Must | The system shall detect which apps are installed on the system. |
 | FR-04 | Should | The system shall allow the user to select their preferred app. |
 | FR-05 | Should | The system shall support the "Open In" action from the header and file viewer. |
+| FR-06 | Must | The system shall provide a fixed catalog of 23 supported apps without the ability to add custom apps. |
+| FR-07 | Should | The system shall store app preference globally, not scoped per-project. |
 
 ## Acceptance Criteria
 
 - [ ] FR-01: Given a configured app, clicking "Open In" launches it with the project directory
 - [ ] FR-02: Given the app catalog, 23+ apps are available for selection
 - [ ] FR-03: Given the system, installed apps are detected and shown as available
+- [ ] FR-06: Given the app catalog, the user cannot add custom apps beyond the 23 provided
+- [ ] FR-07: Given app preference set in one project, the same preference applies across all projects
 
-## Open Questions
+## Constraints
 
-1. Can users add custom apps not in the catalog?
-2. Is there per-project app preference?
+- App preference is stored in localStorage

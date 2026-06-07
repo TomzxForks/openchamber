@@ -83,6 +83,88 @@
 - **Hosting**: Self-hosted; users run locally or on their own servers. Cloudflare tunnels for remote access.
 - **Reverse proxy**: Caddy config provided (Caddyfile) for HTTPS termination
 
+## Event Bus: Backend-to-Frontend Communication
+
+The system uses a layered event bus to relay real-time OpenCode events to the browser UI.
+The transport is SSE from OpenCode to the Express server, then WebSocket from Express to the browser.
+
+### Server-side event stream (`packages/web/server/lib/event-stream/`)
+
+```
+OpenCode CLI                 Express Server                         Browser UI
+    |                            |                                     |
+    |  SSE /global/event         |                                     |
+    +--------------------------->|                                     |
+    |                            | GlobalMessageStreamHub              |
+    |                            | (bounded replay buffer              |
+    |                            |  keyed by eventId)                  |
+    |                            |                                     |
+    |                            |  +-- GlobalWsBridge                 |
+    |                            |  |   (fans out to all WS clients)   |
+    |                            |  +-- Server-side subscribers        |
+    |                            |      (OpenCode watcher, etc.)       |
+    |                            |                                     |
+    |  SSE /event?directory=X    |                                     |
+    +--------------------------->|                                     |
+    |                            | DirectoryWsBridge                   |
+    |                            | (one upstream reader per WS conn)   |
+    |                            |                                     |
+    |                            |  WebSocket                          |
+    |                            +------------------------------------>|
+    |                            |  /api/global/event/ws               |
+    |                            |  /api/event/ws?directory=X          |
+```
+
+**Key components:**
+
+- **`global-hub.js`**: Shared upstream SSE hub for the `/global/event` stream.
+  Holds a bounded replay buffer keyed by SSE `eventId` so reconnecting clients can catch up.
+  Both server-side consumers (OpenCode watcher) and browser WS clients subscribe to this single hub.
+- **`global-ws-bridge.js`**: Browser-facing global WS bridge.
+  Subscribes WS clients to the global hub and fans out events.
+- **`directory-ws-bridge.js`**: Per-directory WS bridge.
+  Owns one scoped upstream SSE reader per WS connection, since directory streams are scoped.
+- **`upstream-reader.js`**: Reusable SSE reader with event-id tracking, stall detection, and automatic reconnect.
+  When an upstream stream stalls, the reader aborts the fetch and reconnects with `Last-Event-ID`.
+- **`protocol.js`**: Path constants (`/api/global/event/ws`, `/api/event/ws`), SSE envelope parsing, and WS frame serialization helpers.
+- **`runtime.js`**: Thin WebSocket server runtime that handles upgrade requests and dispatches to global or directory bridges.
+
+**Global synthetic events** (server-generated, not from OpenCode):
+- `openchamber:session-status`, `openchamber:session-activity`, `openchamber:notification`, `openchamber:heartbeat`
+- Heartbeat frames emit only while an upstream SSE stream is actively attached.
+
+### Client-side event pipeline (`packages/ui/src/sync/`)
+
+```
+WebSocket frames from Express
+    |
+    v
+event-pipeline.ts (reconnect with exponential backoff, coalescing)
+    |
+    v
+event-reducer.ts (transforms raw events into store-friendly patches)
+    |
+    v
+sync-context.tsx handleDirectoryEvent (targeted Zustand store updates)
+    |
+    v
+Split Zustand stores (by change frequency and subscriber set)
+    |
+    v
+React components (re-render only when selected leaf values change)
+```
+
+**Key rules enforced by the sync layer:**
+
+- Targeted cloning: `handleDirectoryEvent` clones only the state fields the incoming event type mutates.
+  During streaming, `message.part.delta` fires ~60/sec; cloning unrelated fields would cause every subscriber to re-render.
+- Two session data scopes: directory-scoped sync stores (live per-directory state) and global sessions cache (`useGlobalSessionsStore`, cold/global lists for sidebar).
+- Store splitting: separate Zustand stores by change frequency and subscriber set.
+  High-frequency streaming state lives in narrow stores (e.g., `viewport-store.ts` for 2-3 subscribers).
+- Reconnect pacing respects `navigator.onLine`, `document.visibilityState`, and HTTP status codes.
+  Permanent 4xx errors jump to long backoff; retryable errors use exponential growth.
+- Optimistic updates use a shadow Map pattern with deterministic cleanup via `mergeOptimisticPage` on next fetch.
+
 ## Architecture Decisions
 
 - **Electron over Tauri for forward desktop**: Electron boots the web server in-process, eliminating the sidecar subprocess complexity. Tauri is kept only for existing users until auto-update migration completes. See `docs/TAURI_TO_ELECTRON_CUTOVER.md`.

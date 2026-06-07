@@ -26,14 +26,17 @@ Cron-based task scheduling that triggers AI prompts automatically at specified t
 | FR-04 | Must | The system shall execute scheduled tasks by triggering an AI prompt. |
 | FR-05 | Should | The system shall provide a task editor dialog with cron visualization. |
 | FR-06 | Should | The system shall coordinate with desktop quit flow to prevent task interruption. |
+| FR-07 | Must | The system shall silently skip missed scheduled tasks without catch-up; tasks only fire while the server is running. |
+| FR-08 | Must | The system shall allow tasks to target specific agents and models via execution configuration. |
 
 ## Acceptance Criteria
 
 - [ ] FR-01: Given the scheduled tasks dialog, the user creates a task with a cron expression
 - [ ] FR-02: Given a scheduled task, the user can disable it without deleting it
 - [ ] FR-04: Given a scheduled task fires, an AI session starts with the configured prompt
+- [ ] FR-07: Given a missed scheduled task, it is silently skipped without catch-up; tasks only fire while the server is running
+- [ ] FR-08: Given a scheduled task, the user can target a specific agent and model via execution configuration
 
-## Open Questions
+## Constraints
 
-1. What happens if the app is offline when a task is scheduled?
-2. Can tasks target specific agents or models?
+_No technical constraints remaining._

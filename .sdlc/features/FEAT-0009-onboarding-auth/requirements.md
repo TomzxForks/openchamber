@@ -29,6 +29,7 @@ OpenChamber provides a first-run onboarding flow that guides users through choos
 | FR-06 | Should | The system shall provide a recovery screen for handling connection failures gracefully. |
 | FR-07 | Should | The system shall provide a desktop connection recovery flow for Electron users. |
 | FR-08 | May | The system shall support one-scan onboarding via tunnel QR code. |
+| FR-09 | Must | The system shall store passkey credentials locally per device; users shall register a new passkey on each device. |
 
 ## Non-Functional Requirements
 
@@ -51,8 +52,4 @@ OpenChamber provides a first-run onboarding flow that guides users through choos
 - [ ] FR-04: Given passkey auth, the user can register and log in with a biometric or hardware key
 - [ ] FR-05: Given a UI password is set, unauthenticated requests are rejected
 - [ ] FR-06: Given a connection failure during onboarding, the recovery screen offers retry options
-
-## Open Questions
-
-1. Is there a plan for SSO/SAML integration?
-2. How are passkey credentials backed up or transferred across devices?
+- [ ] FR-09: Given a user on a new device, when authenticating, they must register a new passkey; credentials from other devices are not available

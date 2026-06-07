@@ -27,6 +27,8 @@ OpenChamber includes a skills catalog for discovering, installing, and managing 
 | FR-04 | Must | The system shall display installed skills that match OpenCode's own skill list. |
 | FR-05 | Should | The system shall support multiple skill sources/registries. |
 | FR-06 | Should | The system shall sync installed skills with the OpenCode server. |
+| FR-09 | Must | The system shall define skills as SKILL.md files with YAML frontmatter and markdown body; skill names shall be 1-64 lowercase alphanumeric characters with hyphens. |
+| FR-10 | Must | The system shall version skills via the ClawdHub API with manual re-installation for updates, supporting conflict resolution (skip or overwrite). |
 
 ## Non-Functional Requirements
 
@@ -40,6 +42,8 @@ OpenChamber includes a skills catalog for discovering, installing, and managing 
 - Skills are defined by OpenCode's skill specification; OpenChamber is a management UI
 - Skills are stored on disk in the project's `.opencode/skills/` directory
 - Remote catalogs are fetched via HTTP
+- Skills use SKILL.md file format with YAML frontmatter followed by markdown body
+- Skills are versioned via the ClawdHub API
 
 ## Acceptance Criteria
 
@@ -47,8 +51,5 @@ OpenChamber includes a skills catalog for discovering, installing, and managing 
 - [ ] FR-02: Given a skill in the catalog, the user can install it with one click
 - [ ] FR-03: Given installed skills, the user can enable, disable, or configure them
 - [ ] FR-04: Given OpenCode skills, the installed list matches what OpenCode reports
-
-## Open Questions
-
-1. What is the skill specification format?
-2. Are skills versioned, and if so, how are updates handled?
+- [ ] FR-09: Given a skill definition, it is a SKILL.md file with YAML frontmatter and a valid name (1-64 lowercase alphanumeric with hyphens)
+- [ ] FR-10: Given an installed skill with a newer version available, re-installing offers conflict resolution (skip or overwrite)

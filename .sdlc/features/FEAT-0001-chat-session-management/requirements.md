@@ -46,6 +46,8 @@ Order rows by priority: Must first, then Should, then May.
 | NFR-02 | Must | Reliability | The SSE event pipeline shall reconnect with exponential backoff, respecting navigator.onLine and visibility state. |
 | NFR-03 | Must | Reliability | Fetch failure must be signaled distinctly from successful-but-empty responses to prevent state corruption. |
 | NFR-04 | Should | Performance | Scroll position shall be preserved across session switches, hydration, and draft-to-session transitions using synchronous layout effects. |
+| NFR-05 | Must | Performance | The system shall paginate messages with an initial page of 150 messages (30 for VS Code/mobile) and history pages of 200. |
+| NFR-06 | Must | Performance | The system shall cap the session list per directory with LRU trimming. |
 
 ## Constraints
 
@@ -63,8 +65,5 @@ Order rows by priority: Must first, then Should, then May.
 - [ ] FR-06: Given an assistant message with tool output, when rendered, it shows a dedicated UI for the tool type (diff, file operation, etc.)
 - [ ] FR-07: Given multiple sessions across projects, the header switcher shows project, branch, diff stats, and unread indicators
 - [ ] FR-08: Given a queue of 3 messages, when the first response completes, the next message sends automatically
-
-## Open Questions
-
-1. What is the maximum supported session size (message count) before pagination or archival is required?
-2. Are there plans for collaborative (multi-user) sessions?
+- [ ] NFR-05: Given a session with 300+ messages, when loading, only the initial page of 150 messages (30 for VS Code/mobile) is fetched
+- [ ] NFR-06: Given a directory with 60+ sessions, when sessions exceed the cap, the least recently used sessions are trimmed
