@@ -6,6 +6,8 @@
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
+import { toast } from "@/components/ui"
+import { useAgentBackendStore } from "@/stores/useAgentBackendStore"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { computeSubtreeIds } from "./scoped-blocking-requests"
@@ -651,6 +653,11 @@ export async function createSession(
     return session
   } catch (error) {
     console.error("[session-actions] createSession failed", error)
+    // FR-6: surface ACP backend failures visibly (never silently swallow).
+    if (useAgentBackendStore.getState().activeBackend === "acp") {
+      const message = error instanceof Error && error.message ? error.message : "ACP session failed to start"
+      toast.error(message)
+    }
     return null
   }
 }
