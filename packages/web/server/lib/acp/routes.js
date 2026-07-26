@@ -9,6 +9,7 @@
 
 import { isAcpEnabled } from './env.js';
 import { AcpEventSource } from './acp-event-source.js';
+import { acpTelemetry } from './telemetry.js';
 
 let activeSource = null;
 let activeConfig = null;
@@ -60,15 +61,21 @@ export function registerAcpRoutes(app, options = {}) {
     });
 
     try {
+      const startedAt = Date.now();
+      acpTelemetry.initializeStart(body.agentId);
       const session = await source.start();
       activeSource = source;
       activeConfig = { command, agentId: body.agentId };
+      acpTelemetry.initializeResult(body.agentId, 'success', Date.now() - startedAt);
+      acpTelemetry.sessionCreated(body.agentId);
       return json(res, 200, {
         sessionID: session.sessionId,
         capabilities: source.options,
         backend: 'acp',
       });
     } catch (error) {
+      acpTelemetry.initializeResult(body.agentId, 'error', 0, error?.code);
+      acpTelemetry.transportError('initialize', error?.code);
       await source.stop().catch(() => {});
       return json(res, 502, { error: error?.message ?? 'ACP initialize failed' });
     }
@@ -87,9 +94,13 @@ export function registerAcpRoutes(app, options = {}) {
     const sessionID = typeof body.sessionID === 'string' ? body.sessionID : activeSource.sessionID;
 
     try {
+      const startedAt = Date.now();
+      acpTelemetry.promptSubmitted(activeConfig?.agentId);
       const stopReason = await activeSource.prompt({ text, sessionID });
+      acpTelemetry.turnCompleted(activeConfig?.agentId, stopReason, Date.now() - startedAt);
       return json(res, 200, { stopReason, sessionID });
     } catch (error) {
+      acpTelemetry.transportError('prompt', error?.code);
       return json(res, 502, { error: error?.message ?? 'ACP prompt failed' });
     }
   });

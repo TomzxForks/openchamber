@@ -71,6 +71,9 @@ export class AcpAgentConnection {
       windowsHide: true,
     });
     this.process = child;
+    if (Number.isInteger(child.pid)) {
+      console.log(`[acp] spawned agent pid=${child.pid} agentId=${this.options.agentId}`);
+    }
 
     // Capture stderr to surface spawn/handshake failures (never logged raw in
     // production unless a debug flag is set; tests read it via the exit error).
@@ -87,6 +90,7 @@ export class AcpAgentConnection {
         if (this._resolveInit) {
           // Exited before initialize completed → handshake failed.
           const detail = stderrBuf.trim().slice(0, 500);
+          console.warn(`[acp] handshake failed: agent pid=${child.pid} exited code=${code} signal=${signal}`);
           reject(new Error(`ACP agent exited before initialize (code=${code} signal=${signal})${detail ? `: ${detail}` : ''}`));
         }
       });

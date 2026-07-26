@@ -134,6 +134,7 @@ export class AcpEventSource {
         this._publish(acpStopReasonToSessionStatus(tag, 'cancelled'));
         return 'cancelled';
       }
+      console.warn(`[acp] transport error during prompt (session=${tag}): ${error?.message ?? error}`);
       this._publish(acpErrorToSessionStatus(tag, error?.message ?? String(error)));
       throw error;
     } finally {
