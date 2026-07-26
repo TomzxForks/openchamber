@@ -18,6 +18,8 @@ import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
+import { registerAcpRoutes } from '../acp/routes.js';
+import { isAcpEnabled } from '../acp/env.js';
 import { getProviderSources, removeProviderConfig } from './providers.js';
 import { getAgentSources, getAgentConfig, createAgent, updateAgent, deleteAgent } from './agents.js';
 import { getCommandSources, createCommand, updateCommand, deleteCommand } from './commands.js';
@@ -108,6 +110,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
+      globalMessageStreamHub,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
@@ -267,6 +270,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
     registerGitRoutes(app);
+    // ACP backend (opt-in, gated by OPENCHAMBER_ACP_ENABLED; OpenCode default).
+    if (isAcpEnabled()) {
+      registerAcpRoutes(app, { globalMessageStreamHub });
+    }
     registerMagicPromptRoutes(app, {
       fsPromises,
       path,

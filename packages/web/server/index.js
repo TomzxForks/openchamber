@@ -1658,6 +1658,7 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    globalMessageStreamHub,
   });
 
   const previewProxyRuntime = createPreviewProxyRuntime({

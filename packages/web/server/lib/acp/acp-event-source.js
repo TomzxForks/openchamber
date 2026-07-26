@@ -43,6 +43,7 @@ export class AcpEventSource {
     this._resolveSessionDone = null;
     this._connection = null;
     this._acc = { messageID: null, partID: null, partsCreated: new Set() };
+    this._promptAbort = null;
   }
 
   /** Spawn + handshake + build a session. Resolves when the session is ready. */
@@ -106,10 +107,15 @@ export class AcpEventSource {
 
     // Reset the per-turn accumulator so a new assistant message is started.
     this._acc = { messageID: null, partID: null, partsCreated: new Set() };
+    this._promptAbort = new AbortController();
 
     try {
       this._session.prompt(text);
       for (;;) {
+        if (this._promptAbort.signal.aborted) {
+          this._publish(acpStopReasonToSessionStatus(tag, 'cancelled'));
+          return 'cancelled';
+        }
         const message = await this._session.nextUpdate();
         if (message?.kind === 'stop') {
           const stopReason = message.response?.stopReason ?? 'end_turn';
@@ -124,9 +130,20 @@ export class AcpEventSource {
         }
       }
     } catch (error) {
+      if (this._promptAbort?.signal.aborted) {
+        this._publish(acpStopReasonToSessionStatus(tag, 'cancelled'));
+        return 'cancelled';
+      }
       this._publish(acpErrorToSessionStatus(tag, error?.message ?? String(error)));
       throw error;
+    } finally {
+      this._promptAbort = null;
     }
+  }
+
+  /** Best-effort cooperative cancel of the in-flight prompt turn. */
+  cancel() {
+    this._promptAbort?.abort();
   }
 
   _publish(event) {
