@@ -1,10 +1,10 @@
 ---
 id: "7"
 title: "Implement ACP event source (notification translation into global-hub)"
-status: pending
+status: done
 size: L
 depends_on: ["6"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

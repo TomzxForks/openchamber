@@ -1,10 +1,10 @@
 ---
 id: "11"
 title: "Add agent-selection and ACP config settings section"
-status: pending
+status: done
 size: M
 depends_on: ["9"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

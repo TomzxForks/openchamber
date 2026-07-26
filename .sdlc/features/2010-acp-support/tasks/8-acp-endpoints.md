@@ -1,10 +1,10 @@
 ---
 id: "8"
 title: "Implement /api/agent/acp/* endpoints"
-status: pending
+status: done
 size: M
 depends_on: ["7"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

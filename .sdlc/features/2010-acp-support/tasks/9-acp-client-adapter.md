@@ -1,10 +1,10 @@
 ---
 id: "9"
 title: "Implement UI AcpClient adapter"
-status: pending
+status: done
 size: M
 depends_on: ["1", "8"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

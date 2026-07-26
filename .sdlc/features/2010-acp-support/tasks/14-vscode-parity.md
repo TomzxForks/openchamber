@@ -1,10 +1,10 @@
 ---
 id: "14"
 title: "VS Code parity for ACP agent-process manager and endpoints"
-status: pending
+status: done
 size: M
 depends_on: ["3", "8"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

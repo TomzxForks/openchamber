@@ -1,10 +1,10 @@
 ---
 id: "10"
 title: "Wire active-client selector at session-create and prompt seams"
-status: pending
+status: done
 size: S
 depends_on: ["2", "9"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

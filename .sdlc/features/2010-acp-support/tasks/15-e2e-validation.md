@@ -1,10 +1,10 @@
 ---
 id: "15"
 title: "End-to-end validation of Must acceptance criteria + baseline green"
-status: pending
+status: done
 size: M
 depends_on: ["10", "11", "12", "13", "14"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 

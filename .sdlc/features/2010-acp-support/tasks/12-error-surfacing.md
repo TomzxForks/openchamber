@@ -1,10 +1,10 @@
 ---
 id: "12"
 title: "Surface ACP failures as visible error states"
-status: pending
+status: done
 size: S
 depends_on: ["8", "10"]
-completed_date: null
+completed_date: "2026-07-04"
 blocker: null
 ---
 
