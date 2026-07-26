@@ -1,6 +1,7 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
 import type { PermissionV2Request, PermissionV2Effect, PermissionV2Source } from "@opencode-ai/sdk/v2/client";
 import type { FilesAPI } from "../api/types";
+import type { AgentClient, AgentCapabilities } from "../agent/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
   Session,
@@ -247,7 +248,8 @@ const getDesktopFilesApi = (): FilesAPI | null => {
   return null;
 };
 
-class OpencodeService {
+class OpencodeService implements AgentClient {
+  readonly backend = "opencode" as const;
   private client: OpencodeClient;
   private baseUrl: string;
   private scopedClients: Map<string, OpencodeClient> = new Map();
@@ -958,6 +960,10 @@ class OpencodeService {
       { throwOnError: true }
     );
     return Boolean(response.data);
+  }
+
+  capabilities(): AgentCapabilities {
+    return { canCancel: true };
   }
 
   async shellSession(params: {
