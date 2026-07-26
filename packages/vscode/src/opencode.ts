@@ -10,6 +10,7 @@ import { randomBytes } from 'crypto';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './opencodeProcessRegistry';
+import { reapOrphanedAcpAgents } from './acpAgentProcessRegistry';
 
 const t = vscode.l10n.t;
 
@@ -927,6 +928,9 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       try {
         const { reaped } = await reapOrphanedProcesses({ log: (msg) => console.log(msg) });
         if (reaped > 0) console.log(`[opencode] startup reaped ${reaped} orphaned process(es)`);
+        // Parity: reap orphaned ACP agents from the same-product registry.
+        const { reaped: reapedAcp } = await reapOrphanedAcpAgents({ log: (msg) => console.log(msg) });
+        if (reapedAcp > 0) console.log(`[acp] startup reaped ${reapedAcp} orphaned ACP agent(s)`);
       } catch (error) {
         console.warn('[opencode] orphan reap failed:', error instanceof Error ? error.message : error);
       }
