@@ -1,0 +1,4 @@
+# .gitignore for SDLC workflow state
+# Local-only workflow state — do not commit
+state.yml
+features/*/progress.md
