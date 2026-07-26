@@ -71,33 +71,6 @@ const readAllEntries = (): Array<{ entry: AcpProcessEntry; filePath: string }> =
   return out;
 };
 
-export const registerAcpAgent = (input: {
-  pid: number | undefined;
-  agentId?: string | null;
-  command?: string | null;
-  ownerPid?: number;
-}): void => {
-  const pid = input.pid;
-  if (!Number.isInteger(pid)) return;
-  writeEntryFile({
-    pid: pid as number,
-    agentId: typeof input.agentId === 'string' ? input.agentId : null,
-    command: typeof input.command === 'string' ? input.command : null,
-    ownerPid: Number.isInteger(input.ownerPid) ? (input.ownerPid as number) : process.pid,
-    transport: 'stdio',
-    spawnedAt: new Date().toISOString(),
-  });
-};
-
-export const unregisterAcpAgent = (pid: number | undefined): void => {
-  if (!Number.isInteger(pid)) return;
-  try {
-    fs.rmSync(entryFilePath(pid as number), { force: true });
-  } catch {
-    // ignore
-  }
-};
-
 const isPidAlive = (pid: number): boolean => {
   if (!Number.isInteger(pid)) return false;
   try {
