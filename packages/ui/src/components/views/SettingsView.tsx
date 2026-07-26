@@ -34,6 +34,7 @@ import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromp
 import { SnippetsSidebar } from '@/components/sections/snippets/SnippetsSidebar';
 import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
+import { AgentBackendPage } from '@/components/sections/agent-backend/AgentBackendPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -215,6 +216,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
 
     case 'git':
       return 'git-branch';
+    case 'agent-backend':
+      return 'terminal-box';
 
     case 'usage':
       return 'bar-chart-2';
@@ -394,6 +397,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.skillsCatalog.title');
       case 'git':
         return t('settings.page.git.title');
+      case 'agent-backend':
+        return t('settings.page.agentBackend.title');
       case 'appearance':
         return t('settings.page.appearance.title');
       case 'chat':
@@ -697,6 +702,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <SnippetsPage />;
       case 'git':
         return <GitPage />;
+      case 'agent-backend':
+        return <AgentBackendPage />;
       case 'general':
       case 'appearance':
       case 'chat':
