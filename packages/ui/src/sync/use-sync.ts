@@ -254,7 +254,12 @@ export function useSync() {
       const current = targetStore.getState()
       const materialization = getSessionMaterializationStatus(current, sessionID)
       const cachedReady = materialization.hasMessages && materialization.renderable
-      const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
+      const sessionMatch = Binary.search(current.session, sessionID, (s) => s.id)
+      const hasSession = sessionMatch.found
+      // ACP sessions live in the ACP agent, not OpenCode. Their content streams
+      // in via the ACP event source, so there is nothing to fetch from OpenCode
+      // (session.get/messages would 500). Skip the OpenCode bootstrap for them.
+      if (hasSession && current.session[sessionMatch.index]?.version === "acp") return
       if (cachedReady && hasSession && !force) return
       const shouldLoadMessages = Boolean(!cachedReady || force)
       const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })

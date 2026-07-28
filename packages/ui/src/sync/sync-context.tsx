@@ -1316,6 +1316,10 @@ async function resyncDirectoryAfterReconnect(
 
   const scopedClient = opencodeClient.getScopedSdkClient(directory)
   await Promise.all(candidateSessionIds.map(async (sessionId) => {
+    // ACP sessions have no OpenCode backing (session.get would 500); skip them.
+    // Their content arrives via the ACP event source, not the OpenCode API.
+    const known = current.session.find((s) => s.id === sessionId)
+    if (known?.version === "acp") return
     syncDebug.recovery.materializing({ reason, directory, sessionID: sessionId })
     const loader = getImperativeSessionMessageLoader()
     const [sessionResponse] = await Promise.all([
