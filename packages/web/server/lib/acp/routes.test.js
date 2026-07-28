@@ -20,8 +20,9 @@ const captureHub = () => {
 };
 
 const buildApp = (hub) => {
+  // NOTE: no global express.json() — the real server has none. Each route must
+  // mount its own body parser (matches production; catches missing-parser regressions).
   const app = express();
-  app.use(express.json({ limit: '1mb' }));
   registerAcpRoutes(app, { globalMessageStreamHub: hub });
   return app;
 };

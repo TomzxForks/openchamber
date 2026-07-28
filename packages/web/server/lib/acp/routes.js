@@ -7,6 +7,7 @@
 // Per decision FEAT-2010-DEC-1, one ACP agent connection is active at a time
 // (single-client); initialize replaces any active source.
 
+import express from 'express';
 import { isAcpEnabled } from './env.js';
 import { AcpEventSource } from './acp-event-source.js';
 import { acpTelemetry } from './telemetry.js';
@@ -39,7 +40,7 @@ export function registerAcpRoutes(app, options = {}) {
   if (!app) return;
   const hub = options.globalMessageStreamHub;
 
-  app.post('/api/agent/acp/initialize', async (req, res) => {
+  app.post('/api/agent/acp/initialize', express.json({ limit: "1mb" }), async (req, res) => {
     if (!ensureEnabled(res)) return;
     const body = req.body ?? {};
     const command = typeof body.command === 'string' ? body.command : '';
@@ -81,7 +82,7 @@ export function registerAcpRoutes(app, options = {}) {
     }
   });
 
-  app.post('/api/agent/acp/session/prompt', async (req, res) => {
+  app.post('/api/agent/acp/session/prompt', express.json({ limit: "1mb" }), async (req, res) => {
     if (!ensureEnabled(res)) return;
     if (!activeSource) {
       return json(res, 409, { error: 'No active ACP session (call /initialize first)' });
@@ -105,7 +106,7 @@ export function registerAcpRoutes(app, options = {}) {
     }
   });
 
-  app.post('/api/agent/acp/session/cancel', async (req, res) => {
+  app.post('/api/agent/acp/session/cancel', express.json({ limit: "1mb" }), async (req, res) => {
     if (!ensureEnabled(res)) return;
     if (!activeSource) {
       return json(res, 409, { error: 'No active ACP session' });
@@ -118,7 +119,7 @@ export function registerAcpRoutes(app, options = {}) {
     }
   });
 
-  app.post('/api/agent/acp/shutdown', async (_req, res) => {
+  app.post('/api/agent/acp/shutdown', express.json({ limit: "1mb" }), async (_req, res) => {
     if (!ensureEnabled(res)) return;
     await teardownActive();
     return json(res, 200, { ok: true });
