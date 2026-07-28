@@ -61,6 +61,7 @@ export const acpUpdateToEvents = (params, ctx, acc = { messageID: null, partID: 
 
 const ensureAssistantMessage = (ctx, acc, acpMessageId) => {
   if (acc.messageID && (typeof acpMessageId !== 'string' || acpMessageId === acc._acpMessageId)) {
+    acc.messageIsNew = false;
     return acc.messageID;
   }
   acc._acpMessageId = typeof acpMessageId === 'string' ? acpMessageId : undefined;
@@ -69,7 +70,25 @@ const ensureAssistantMessage = (ctx, acc, acpMessageId) => {
     : (ctx.newMessageId ? ctx.newMessageId() : hexId('msg'));
   acc.partID = `${acc.messageID}-text`;
   acc.partsCreated = new Set();
+  acc.messageIsNew = true;
   return acc.messageID;
+};
+
+// Register the assistant message in the session's message list so the UI reducer
+// links subsequent parts to it (otherwise parts are orphaned and never render).
+const registerMessageEvent = (messageID, sessionID) => {
+  const now = Date.now();
+  return {
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        time: { created: now, updated: now },
+      },
+    },
+  };
 };
 
 const agentMessageChunkToUpdate = (update, ctx, acc) => {
@@ -78,26 +97,34 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
     // Non-text content blocks are out of scope for Must (FR-4 covers text + tool).
     return [];
   }
+  const sessionID = ctx.sessionID;
   const messageID = ensureAssistantMessage(ctx, acc, update.messageId);
   const partID = acc.partID;
+  const events = [];
+  if (acc.messageIsNew) {
+    events.push(registerMessageEvent(messageID, sessionID));
+  }
 
   // First chunk for this text part -> create it via message.part.updated.
   // Subsequent chunks -> append via message.part.delta (streaming-efficient).
   if (!acc.partsCreated.has(partID)) {
     acc.partsCreated.add(partID);
-    return [{
+    events.push({
       type: 'message.part.updated',
       properties: {
+        sessionID,
         part: {
           id: partID,
           type: 'text',
           messageID,
+          sessionID,
           text: content.text,
         },
       },
-    }];
+    });
+    return events;
   }
-  return [{
+  events.push({
     type: 'message.part.delta',
     properties: {
       messageID,
@@ -105,43 +132,55 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
       field: 'text',
       delta: content.text,
     },
-  }];
+  });
+  return events;
 };
 
 const toolCallToUpdate = (update, ctx, acc) => {
+  const sessionID = ctx.sessionID;
   const toolCallId = typeof update.toolCallId === 'string' && update.toolCallId.length > 0
     ? update.toolCallId
     : (ctx.newPartId ? ctx.newPartId() : hexId('part'));
-  const messageID = acc.messageID ?? (ctx.newMessageId ? ctx.newMessageId() : hexId('msg'));
-  acc.messageID = messageID;
+  // Ensure an owning assistant message exists for the tool part.
+  const messageID = ensureAssistantMessage(ctx, acc, undefined);
   acc.partsCreated.add(toolCallId);
-  return [{
+  const events = [];
+  if (acc.messageIsNew) {
+    events.push(registerMessageEvent(messageID, sessionID));
+  }
+  events.push({
     type: 'message.part.updated',
     properties: {
+      sessionID,
       part: {
         id: toolCallId,
         type: 'tool',
         messageID,
+        sessionID,
         tool: update.title ?? '',
         state: update.status ?? 'pending',
         // Preserve ACP-specific metadata for the renderer.
         ...(update.kind ? { acpKind: update.kind } : {}),
       },
     },
-  }];
+  });
+  return events;
 };
 
-const toolCallUpdateToUpdate = (update, _ctx, acc) => {
+const toolCallUpdateToUpdate = (update, ctx, acc) => {
   const toolCallId = update.toolCallId;
   if (typeof toolCallId !== 'string' || toolCallId.length === 0) return [];
+  const sessionID = ctx.sessionID;
   const messageID = acc.messageID ?? null;
   const resultText = extractToolResultText(update.content);
   return [{
     type: 'message.part.updated',
     properties: {
+      sessionID,
       part: {
         id: toolCallId,
         type: 'tool',
+        ...(sessionID ? { sessionID } : {}),
         ...(messageID ? { messageID } : {}),
         ...(update.status ? { state: update.status } : {}),
         ...(resultText ? { output: resultText } : {}),
