@@ -124,7 +124,10 @@ export class AcpEventSource {
         }
         const notification = message?.notification;
         if (notification) {
-          for (const event of acpUpdateToEvents(notification, { sessionID: tag }, this._acc)) {
+          const updateKind = notification?.update?.sessionUpdate;
+          const events = acpUpdateToEvents(notification, { sessionID: tag }, this._acc);
+          console.log(`[acp] update sessionUpdate=${updateKind} translated=${events.length} session=${tag} dir=${this.options.directory ?? '(none)'}`);
+          for (const event of events) {
             this._publish(event);
           }
         }
