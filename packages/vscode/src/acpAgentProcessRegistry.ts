@@ -31,21 +31,6 @@ const resolveRegistryDir = (): string => {
   return path.join(os.homedir(), '.config', 'openchamber', 'managed-acp-agents');
 };
 
-const entryFilePath = (pid: number): string => path.join(resolveRegistryDir(), `${pid}.json`);
-
-const writeEntryFile = (entry: AcpProcessEntry): void => {
-  const dir = resolveRegistryDir();
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `${entry.pid}.json`);
-    const tmp = `${filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(entry, null, 2));
-    fs.renameSync(tmp, filePath);
-  } catch {
-    // Best-effort: a failed registry write must never break spawn/shutdown.
-  }
-};
-
 const readAllEntries = (): Array<{ entry: AcpProcessEntry; filePath: string }> => {
   const dir = resolveRegistryDir();
   let names: string[] = [];
