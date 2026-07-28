@@ -98,7 +98,7 @@ export function AgentBackendPage() {
             agents.map((agent) => {
               const isActive = activeBackend === 'acp' && activeAcpAgentId === agent.id;
               return (
-                <div key={agent.id} className="space-y-2 p-2" data-settings-item={`agent-backend.agent.${agent.id}`}>
+                <div key={agent.id} className="space-y-1.5 p-2" data-settings-item={`agent-backend.agent.${agent.id}`}>
                   <div className="flex items-center gap-2">
                     <Radio
                       checked={isActive}
@@ -124,14 +124,20 @@ export function AgentBackendPage() {
                       ×
                     </Button>
                   </div>
-                  <Input
-                    className="h-7"
-                    placeholder={t('settings.agentBackend.field.command.placeholder')}
-                    value={agent.command}
-                    onChange={(e) => updateAgent(agent.id, { command: e.target.value })}
-                    aria-label={t('settings.agentBackend.field.command')}
-                  />
-                  <div className="flex cursor-pointer items-center gap-2 py-0.5">
+                  <div className="space-y-1 pl-6">
+                    <label className={cn('typography-meta', 'text-muted-foreground block')} htmlFor={`agent-command-${agent.id}`}>
+                      {t('settings.agentBackend.field.command')}
+                    </label>
+                    <Input
+                      id={`agent-command-${agent.id}`}
+                      className="h-7"
+                      placeholder={t('settings.agentBackend.field.command.placeholder')}
+                      value={agent.command}
+                      onChange={(e) => updateAgent(agent.id, { command: e.target.value })}
+                      aria-label={t('settings.agentBackend.field.command')}
+                    />
+                  </div>
+                  <div className="flex cursor-pointer items-center gap-2 py-0.5 pl-6">
                     <Checkbox
                       checked={agent.enabled}
                       onChange={(checked) => updateAgent(agent.id, { enabled: checked })}
