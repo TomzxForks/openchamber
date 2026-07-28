@@ -156,6 +156,7 @@ export function createGlobalMessageStreamHub({
         typeof directoryArg === 'string' && directoryArg.length > 0 ? directoryArg : 'global';
       const eventId = `acp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       const normalized = normalizeEvent({ envelope: { directory, eventId }, payload });
+      console.log(`[acp] publish type=${payload?.type} dir=${directory} subscribers=${eventSubscribers.size}`);
       for (const subscriber of Array.from(eventSubscribers)) {
         notifySubscriber('event', subscriber, normalized);
       }
