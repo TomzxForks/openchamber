@@ -112,7 +112,7 @@ export class AcpClient implements AgentClient {
     const response = await runtimeFetch("/api/agent/acp/session/prompt", {
       method: "POST",
       headers: JSON_HEADERS,
-      body: JSON.stringify({ sessionID: params.id, text: params.text }),
+      body: JSON.stringify({ sessionID: params.id, text: params.text, userMessageId: params.messageId }),
     });
 
     if (!response.ok) {

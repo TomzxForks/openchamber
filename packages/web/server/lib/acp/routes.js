@@ -97,7 +97,7 @@ export function registerAcpRoutes(app, options = {}) {
     try {
       const startedAt = Date.now();
       acpTelemetry.promptSubmitted(activeConfig?.agentId);
-      const stopReason = await activeSource.prompt({ text, sessionID });
+      const stopReason = await activeSource.prompt({ text, sessionID, userMessageId: body.userMessageId });
       acpTelemetry.turnCompleted(activeConfig?.agentId, stopReason, Date.now() - startedAt);
       return json(res, 200, { stopReason, sessionID });
     } catch (error) {

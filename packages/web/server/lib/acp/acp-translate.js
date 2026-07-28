@@ -7,12 +7,27 @@
 // (acp-event-source.js) feeds ACP notifications in and publishes the resulting
 // payloads via the global hub.
 
-// Synthesize a hex-timestamp-style id matching the OpenCode/OpenChamber format
-// (optimistic-updates rule: client-generated IDs use hex timestamps).
+// Synthesize ids using the SAME scheme as the UI's ascendingId
+// (packages/ui/src/lib/opencode/client.ts): timestamp*0x1000 + counter, top
+// 6 bytes as hex. This guarantees monotonically increasing ids that sort in
+// chronological order, so the assistant message sorts AFTER the user message
+// (the reply is generated later than the send) and the chat renders the turn.
 let idCounter = 0;
+let lastIdTimestamp = 0;
 const hexId = (prefix) => {
+  const timestamp = Date.now();
+  if (timestamp !== lastIdTimestamp) {
+    lastIdTimestamp = timestamp;
+    idCounter = 0;
+  }
   idCounter += 1;
-  return `${prefix}_${Date.now().toString(16)}_${idCounter.toString(16)}`;
+  const sortable = BigInt(timestamp) * BigInt(0x1000) + BigInt(idCounter);
+  const timeBytes = new Uint8Array(6);
+  for (let index = 0; index < 6; index += 1) {
+    timeBytes[index] = Number((sortable >> BigInt(40 - 8 * index)) & BigInt(0xff));
+  }
+  const hex = Array.from(timeBytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${prefix}_${hex}${Math.random().toString(36).slice(2, 8)}`;
 };
 
 /**
@@ -76,7 +91,9 @@ const ensureAssistantMessage = (ctx, acc, acpMessageId) => {
 
 // Register the assistant message in the session's message list so the UI reducer
 // links subsequent parts to it (otherwise parts are orphaned and never render).
-const registerMessageEvent = (messageID, sessionID) => {
+// parentID MUST point at the user message id so projectTurnRecords attaches the
+// assistant reply to the user's turn (without it the assistant is dropped).
+const registerMessageEvent = (messageID, sessionID, parentID) => {
   const now = Date.now();
   return {
     type: 'message.updated',
@@ -85,6 +102,7 @@ const registerMessageEvent = (messageID, sessionID) => {
         id: messageID,
         sessionID,
         role: 'assistant',
+        ...(parentID ? { parentID } : {}),
         time: { created: now, updated: now },
       },
     },
@@ -102,7 +120,7 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
   const partID = acc.partID;
   const events = [];
   if (acc.messageIsNew) {
-    events.push(registerMessageEvent(messageID, sessionID));
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
   }
 
   // First chunk for this text part -> create it via message.part.updated.
@@ -146,7 +164,7 @@ const toolCallToUpdate = (update, ctx, acc) => {
   acc.partsCreated.add(toolCallId);
   const events = [];
   if (acc.messageIsNew) {
-    events.push(registerMessageEvent(messageID, sessionID));
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
   }
   events.push({
     type: 'message.part.updated',
