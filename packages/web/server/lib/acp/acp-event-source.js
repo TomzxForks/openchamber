@@ -119,6 +119,7 @@ export class AcpEventSource {
         const message = await this._session.nextUpdate();
         if (message?.kind === 'stop') {
           const stopReason = message.response?.stopReason ?? 'end_turn';
+          console.log(`[acp] stop stopReason=${stopReason} session=${tag} raw=${JSON.stringify(message.response).slice(0, 300)}`);
           this._publish(acpStopReasonToSessionStatus(tag, stopReason));
           return stopReason;
         }
@@ -126,7 +127,7 @@ export class AcpEventSource {
         if (notification) {
           const updateKind = notification?.update?.sessionUpdate;
           const events = acpUpdateToEvents(notification, { sessionID: tag }, this._acc);
-          console.log(`[acp] update sessionUpdate=${updateKind} translated=${events.length} session=${tag} dir=${this.options.directory ?? '(none)'}`);
+          console.log(`[acp] update sessionUpdate=${updateKind} translated=${events.length} session=${tag} dir=${this.options.directory ?? '(none)'} raw=${JSON.stringify(notification.update).slice(0, 400)}`);
           for (const event of events) {
             this._publish(event);
           }
