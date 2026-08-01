@@ -17,7 +17,30 @@ import {
   acpUpdateToEvents,
   acpStopReasonToSessionStatus,
   acpErrorToSessionStatus,
+  messageCompletionEvent,
 } from './acp-translate.js';
+
+// Best-effort extraction of a model label for the message footer. ACP agents
+// report model info inconsistently (session modes, meta, initialize caps), so
+// search a few common locations.
+const extractModelLabel = (session) => {
+  if (!session) return null;
+  const candidates = [
+    session.modes?.model,
+    session.meta?.model,
+    session.meta?.defaultModel,
+    session.newSessionResponse?.modes?.model,
+    session.newSessionResponse?.meta?.model,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.length > 0) return c;
+    if (c && typeof c === 'object') {
+      const id = c.id || c.modelID || c.name;
+      if (typeof id === 'string' && id.length > 0) return id;
+    }
+  }
+  return null;
+};
 
 /**
  * @typedef {Object} AcpEventSourceOptions
@@ -42,8 +65,12 @@ export class AcpEventSource {
     this._ctx = null;
     this._resolveSessionDone = null;
     this._connection = null;
-    this._acc = { messageID: null, partID: null, partsCreated: new Set() };
+    this._acc = { messageID: null, partID: null, partsCreated: new Set(), lastKind: null };
     this._promptAbort = null;
+    // Footer labels: agent name (from config) and model (captured from the
+    // session/initialize response if the agent reports one).
+    this._agentLabel = typeof options.agentName === 'string' && options.agentName.length > 0 ? options.agentName : 'ACP';
+    this._modelLabel = null;
   }
 
   /** Spawn + handshake + build a session. Resolves when the session is ready. */
@@ -63,7 +90,10 @@ export class AcpEventSource {
         await builder.withSession(async (session) => {
           this._session = session;
           this.sessionID = session.sessionId;
-          console.log(`[acp] session new sessionId=${session.sessionId} modes=${JSON.stringify(session.modes ?? null)} meta=${JSON.stringify(session.meta ?? null).slice(0, 400)}`);
+          // Try to capture a model label for the message footer from the session
+          // modes/meta (agents report it in different places; best-effort).
+          this._modelLabel = extractModelLabel(session);
+          console.log(`[acp] session new sessionId=${session.sessionId} model=${this._modelLabel ?? '(none)'} modes=${JSON.stringify(session.modes ?? null)} meta=${JSON.stringify(session.meta ?? null).slice(0, 400)}`);
           // Park for the connection's lifetime; prompts are driven via prompt().
           await new Promise((resolve) => { this._resolveSessionDone = resolve; });
         });
@@ -122,13 +152,16 @@ export class AcpEventSource {
         if (message?.kind === 'stop') {
           const stopReason = message.response?.stopReason ?? 'end_turn';
           console.log(`[acp] stop stopReason=${stopReason} session=${tag} raw=${JSON.stringify(message.response).slice(0, 300)}`);
+          // Mark the assistant message completed so the footer renders duration.
+          const completion = messageCompletionEvent(this._acc, tag, stopReason);
+          if (completion) this._publish(completion);
           this._publish(acpStopReasonToSessionStatus(tag, stopReason));
           return stopReason;
         }
         const notification = message?.notification;
         if (notification) {
           const updateKind = notification?.update?.sessionUpdate;
-          const events = acpUpdateToEvents(notification, { sessionID: tag, parentID: userMessageId }, this._acc);
+          const events = acpUpdateToEvents(notification, { sessionID: tag, parentID: userMessageId, agentName: this._agentLabel, modelLabel: this._modelLabel }, this._acc);
           console.log(`[acp] update sessionUpdate=${updateKind} translated=${events.length} session=${tag} dir=${this.options.directory ?? '(none)'} raw=${JSON.stringify(notification.update).slice(0, 400)}`);
           for (const event of events) {
             this._publish(event);

@@ -55,6 +55,7 @@ export function registerAcpRoutes(app, options = {}) {
       hub,
       directory: typeof body.directory === 'string' ? body.directory : undefined,
       agentId: typeof body.agentId === 'string' ? body.agentId : 'acp-agent',
+      agentName: (typeof body.name === 'string' && body.name.length > 0 ? body.name : null) || (typeof body.agentId === 'string' ? body.agentId : 'ACP'),
       command,
       args: Array.isArray(body.args) ? body.args : undefined,
       env: body.env && typeof body.env === 'object' ? body.env : undefined,

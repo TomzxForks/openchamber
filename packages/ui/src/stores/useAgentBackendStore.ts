@@ -62,6 +62,7 @@ const applySelection = (state: PersistedState) => {
         args: acpAgent.args,
         env: acpAgent.env,
         agentId: acpAgent.id,
+        name: acpAgent.name,
       }),
     );
   } else {

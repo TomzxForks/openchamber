@@ -27,6 +27,8 @@ export type AcpAgentRuntimeConfig = {
   env?: Record<string, string>;
   /** Stable agent id (links to the server-side process registry). */
   agentId?: string;
+  /** Display name (shown in the assistant message footer). */
+  name?: string;
 };
 
 type InitializeResponse = {
@@ -79,6 +81,7 @@ export class AcpClient implements AgentClient {
       args: this.config.args,
       env: this.config.env,
       agentId: this.config.agentId,
+      name: this.config.name,
       cwd: directory ?? undefined,
       directory: directory ?? undefined,
     };

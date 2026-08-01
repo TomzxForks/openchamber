@@ -96,8 +96,11 @@ const ensureAssistantMessage = (ctx, acc, acpMessageId, { forceNew = false } = {
 // links subsequent parts to it (otherwise parts are orphaned and never render).
 // parentID MUST point at the user message id so projectTurnRecords attaches the
 // assistant reply to the user's turn (without it the assistant is dropped).
-const registerMessageEvent = (messageID, sessionID, parentID) => {
+// agent/model populate the message footer; created is reused for the completion
+// event so the footer can show execution duration.
+const registerMessageEvent = (messageID, sessionID, parentID, ctx, acc) => {
   const now = Date.now();
+  acc.messageCreatedAt = now;
   return {
     type: 'message.updated',
     properties: {
@@ -106,7 +109,28 @@ const registerMessageEvent = (messageID, sessionID, parentID) => {
         sessionID,
         role: 'assistant',
         ...(parentID ? { parentID } : {}),
+        ...(ctx && ctx.agentName ? { agent: ctx.agentName } : {}),
+        ...(ctx && ctx.modelLabel ? { modelID: ctx.modelLabel, model: { id: ctx.modelLabel, providerID: 'acp' } } : {}),
         time: { created: now, updated: now },
+      },
+    },
+  };
+};
+
+// Mark the assistant message completed at turn stop so the footer can render
+// the execution duration (completed - created) and the completion state.
+const messageCompletionEvent = (acc, sessionID, stopReason) => {
+  if (!acc || !acc.messageID) return null;
+  const now = Date.now();
+  return {
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: acc.messageID,
+        sessionID,
+        role: 'assistant',
+        time: { created: acc.messageCreatedAt ?? now, completed: now, updated: now },
+        ...(stopReason ? { finish: stopReason } : {}),
       },
     },
   };
@@ -127,7 +151,7 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
   const partID = acc.partID;
   const events = [];
   if (acc.messageIsNew) {
-    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID, ctx, acc));
   }
 
   // First chunk for this text part -> create it via message.part.updated.
@@ -175,7 +199,7 @@ const agentThoughtChunkToUpdate = (update, ctx, acc) => {
   const partID = `${messageID}-reasoning`;
   const events = [];
   if (acc.messageIsNew) {
-    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID, ctx, acc));
   }
   if (!acc.partsCreated.has(partID)) {
     acc.partsCreated.add(partID);
@@ -216,7 +240,7 @@ const toolCallToUpdate = (update, ctx, acc) => {
   acc.partsCreated.add(toolCallId);
   const events = [];
   if (acc.messageIsNew) {
-    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID, ctx, acc));
   }
   events.push({
     type: 'message.part.updated',
@@ -305,6 +329,8 @@ export const acpErrorToSessionStatus = (sessionID, message) => ({
     error: typeof message === 'string' && message.length > 0 ? message : 'ACP transport error',
   },
 });
+
+export { messageCompletionEvent };
 
 /** Reset the internal id counter (test helper). */
 export const _resetTranslateCounter = () => { idCounter = 0; };
