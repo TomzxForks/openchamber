@@ -56,26 +56,29 @@ const hexId = (prefix) => {
  * @param {object} [acc]  Mutable accumulator tracking the current assistant message/part.
  * @returns {Array<{ type: string, properties: Record<string, unknown> }>}
  */
-export const acpUpdateToEvents = (params, ctx, acc = { messageID: null, partID: null, partsCreated: new Set() }) => {
+export const acpUpdateToEvents = (params, ctx, acc = { messageID: null, partID: null, partsCreated: new Set(), lastKind: null }) => {
   const update = params?.update;
   if (!update || typeof update !== 'object') return [];
   const kind = update.sessionUpdate;
 
+  let events;
   if (kind === 'agent_message_chunk') {
-    return agentMessageChunkToUpdate(update, ctx, acc);
+    events = agentMessageChunkToUpdate(update, ctx, acc);
+  } else if (kind === 'agent_thought_chunk') {
+    events = agentThoughtChunkToUpdate(update, ctx, acc);
+  } else if (kind === 'tool_call') {
+    events = toolCallToUpdate(update, ctx, acc);
+  } else if (kind === 'tool_call_update') {
+    events = toolCallUpdateToUpdate(update, ctx, acc);
+  } else {
+    events = [];
   }
-  if (kind === 'tool_call') {
-    return toolCallToUpdate(update, ctx, acc);
-  }
-  if (kind === 'tool_call_update') {
-    return toolCallUpdateToUpdate(update, ctx, acc);
-  }
-  // plan, usage_update, agent_thought_chunk, user_message_chunk -> deferred (Should).
-  return [];
+  acc.lastKind = kind;
+  return events;
 };
 
-const ensureAssistantMessage = (ctx, acc, acpMessageId) => {
-  if (acc.messageID && (typeof acpMessageId !== 'string' || acpMessageId === acc._acpMessageId)) {
+const ensureAssistantMessage = (ctx, acc, acpMessageId, { forceNew = false } = {}) => {
+  if (!forceNew && acc.messageID && (typeof acpMessageId !== 'string' || acpMessageId === acc._acpMessageId)) {
     acc.messageIsNew = false;
     return acc.messageID;
   }
@@ -116,7 +119,11 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
     return [];
   }
   const sessionID = ctx.sessionID;
-  const messageID = ensureAssistantMessage(ctx, acc, update.messageId);
+  // Start a new assistant message when a message chunk follows reasoning/tools,
+  // so a session preamble (pi-acp's skills listing) and the actual answer render
+  // as separate messages instead of being concatenated.
+  const interrupted = acc.messageID !== null && acc.lastKind !== null && acc.lastKind !== 'agent_message_chunk';
+  const messageID = ensureAssistantMessage(ctx, acc, update.messageId, { forceNew: interrupted });
   const partID = acc.partID;
   const events = [];
   if (acc.messageIsNew) {
@@ -134,6 +141,51 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
         part: {
           id: partID,
           type: 'text',
+          messageID,
+          sessionID,
+          text: content.text,
+        },
+      },
+    });
+    return events;
+  }
+  events.push({
+    type: 'message.part.delta',
+    properties: {
+      messageID,
+      partID,
+      field: 'text',
+      delta: content.text,
+    },
+  });
+  return events;
+};
+
+// Translate ACP agent reasoning (agent_thought_chunk) into OpenChamber reasoning
+// parts (type: 'reasoning'), rendered as the collapsed "thinking" block. The
+// reasoning attaches to the current assistant message; first chunk creates the
+// part, subsequent chunks append.
+const agentThoughtChunkToUpdate = (update, ctx, acc) => {
+  const content = update.content;
+  if (!content || content.type !== 'text' || typeof content.text !== 'string') {
+    return [];
+  }
+  const sessionID = ctx.sessionID;
+  const messageID = ensureAssistantMessage(ctx, acc, undefined);
+  const partID = `${messageID}-reasoning`;
+  const events = [];
+  if (acc.messageIsNew) {
+    events.push(registerMessageEvent(messageID, sessionID, ctx.parentID));
+  }
+  if (!acc.partsCreated.has(partID)) {
+    acc.partsCreated.add(partID);
+    events.push({
+      type: 'message.part.updated',
+      properties: {
+        sessionID,
+        part: {
+          id: partID,
+          type: 'reasoning',
           messageID,
           sessionID,
           text: content.text,
