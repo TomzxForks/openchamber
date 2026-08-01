@@ -73,6 +73,12 @@ export const acpUpdateToEvents = (params, ctx, acc = { messageID: null, partID: 
   } else {
     events = [];
   }
+  // Track when the last content arrived so the completion event can stamp
+  // completed = last-content-time (not the stop-notification time, which lags
+  // behind actual content completion and inflates the footer duration).
+  if (events.length > 0) {
+    acc.lastContentAt = Date.now();
+  }
   acc.lastKind = kind;
   return events;
 };
@@ -130,7 +136,10 @@ const registerMessageEvent = (messageID, sessionID, parentID, ctx, acc) => {
 // messageFinish === 'stop'; the ACP stopReason does not match.
 const messageCompletionEvent = (acc, sessionID, stopReason) => {
   if (!acc || !acc.messageID) return null;
-  const now = Date.now();
+  // completed = when the last content chunk arrived, NOT the stop-notification
+  // time (the stop lags behind actual content completion and would inflate the
+  // footer duration). Fall back to now only if no content was produced.
+  const completed = acc.lastContentAt ?? Date.now();
   return {
     type: 'message.updated',
     properties: {
@@ -141,7 +150,7 @@ const messageCompletionEvent = (acc, sessionID, stopReason) => {
         ...(acc.messageParentID ? { parentID: acc.messageParentID } : {}),
         ...(acc.messageAgent ? { agent: acc.messageAgent } : {}),
         ...(acc.messageModel ? { modelID: acc.messageModel, model: { id: acc.messageModel, providerID: 'acp' } } : {}),
-        time: { created: acc.messageCreatedAt ?? now, completed: now, updated: now },
+        time: { created: acc.messageCreatedAt ?? completed, completed, updated: completed },
         finish: 'stop',
       },
     },
