@@ -63,6 +63,7 @@ export class AcpEventSource {
         await builder.withSession(async (session) => {
           this._session = session;
           this.sessionID = session.sessionId;
+          console.log(`[acp] session new sessionId=${session.sessionId} modes=${JSON.stringify(session.modes ?? null)} meta=${JSON.stringify(session.meta ?? null).slice(0, 400)}`);
           // Park for the connection's lifetime; prompts are driven via prompt().
           await new Promise((resolve) => { this._resolveSessionDone = resolve; });
         });

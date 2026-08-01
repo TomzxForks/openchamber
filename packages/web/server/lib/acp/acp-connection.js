@@ -125,6 +125,7 @@ export class AcpAgentConnection {
           clientCapabilities: {},
         });
         this.initializeResult = initResult;
+        console.log(`[acp] initialized protocolVersion=${initResult?.protocolVersion} raw=${JSON.stringify(initResult).slice(0, 600)}`);
         this._resolveInit(initResult);
         try {
           if (typeof onReady === 'function') await onReady(ctx, initResult);
