@@ -11,6 +11,7 @@ import express from 'express';
 import { isAcpEnabled, getStartupAcpConfig } from './env.js';
 import { AcpEventSource } from './acp-event-source.js';
 import { acpTelemetry } from './telemetry.js';
+import { writeAcpAgentConfig, clearAcpAgentConfig } from './acp-config.js';
 
 let activeSource = null;
 let activeConfig = null;
@@ -79,6 +80,26 @@ export async function initAcpOnStartup(hub) {
 export function registerAcpRoutes(app, options = {}) {
   if (!app) return;
   const hub = options.globalMessageStreamHub;
+
+  // Persist the ACP agent config when the user changes it in settings.
+  // The server reads this at startup to initialize the agent.
+  app.put('/api/agent/acp/config', express.json({ limit: '1mb' }), async (req, res) => {
+    if (!ensureEnabled(res)) return;
+    const body = req.body ?? {};
+    if (typeof body.command !== 'string' || body.command.trim().length === 0) {
+      // Empty command = clear the config (ACP agent removed or disabled).
+      clearAcpAgentConfig();
+      return json(res, 200, { ok: true });
+    }
+    writeAcpAgentConfig({
+      command: body.command,
+      args: Array.isArray(body.args) ? body.args : undefined,
+      agentName: typeof body.agentName === 'string' ? body.agentName : undefined,
+      agentId: typeof body.agentId === 'string' ? body.agentId : 'acp-startup',
+      cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+    });
+    return json(res, 200, { ok: true });
+  });
 
   app.post('/api/agent/acp/initialize', express.json({ limit: "1mb" }), async (req, res) => {
     if (!ensureEnabled(res)) return;

@@ -4,6 +4,8 @@
 // (agent-process-manager, acp-event-source, routes) have a single import
 // point. OpenCode remains the default backend; ACP is opt-in.
 
+import { readAcpAgentConfig } from './acp-config.js';
+
 const isEnvFlagEnabled = (value) => {
   if (value === true || value === 1) return true;
   if (typeof value !== 'string') return false;
@@ -30,22 +32,39 @@ export const resolveAcpRegistryDir = () => {
 };
 
 /**
- * Startup ACP agent configuration from environment variables. When
- * OPENCHAMBER_ACP_COMMAND is set, the server initializes the agent connection
- * at boot (no need to wait for the first session creation from the UI).
+ * Startup ACP agent configuration. Reads from the persisted config file
+ * (~/.config/openchamber/acp-agent-config.json, written on /initialize) so the
+ * server can re-initialize the agent on restart without env vars. Env vars
+ * (OPENCHAMBER_ACP_COMMAND etc.) act as an explicit override if set.
  * Returns null if no command is configured.
  */
 export const getStartupAcpConfig = () => {
-  const command = process.env.OPENCHAMBER_ACP_COMMAND;
-  if (typeof command !== 'string' || command.trim().length === 0) return null;
-  const argsRaw = process.env.OPENCHAMBER_ACP_ARGS;
-  return {
-    command: command.trim(),
-    args: typeof argsRaw === 'string' && argsRaw.trim().length > 0
-      ? argsRaw.split(',').map((a) => a.trim()).filter(Boolean)
-      : undefined,
-    agentName: (typeof process.env.OPENCHAMBER_ACP_AGENT_NAME === 'string' && process.env.OPENCHAMBER_ACP_AGENT_NAME.trim()) || undefined,
-    agentId: 'acp-startup',
-    cwd: (typeof process.env.OPENCHAMBER_ACP_CWD === 'string' && process.env.OPENCHAMBER_ACP_CWD.trim()) || undefined,
-  };
+  // Env var override (power users).
+  const envCommand = process.env.OPENCHAMBER_ACP_COMMAND;
+  if (typeof envCommand === 'string' && envCommand.trim().length > 0) {
+    const argsRaw = process.env.OPENCHAMBER_ACP_ARGS;
+    return {
+      command: envCommand.trim(),
+      args: typeof argsRaw === 'string' && argsRaw.trim().length > 0
+        ? argsRaw.split(',').map((a) => a.trim()).filter(Boolean)
+        : undefined,
+      agentName: (typeof process.env.OPENCHAMBER_ACP_AGENT_NAME === 'string' && process.env.OPENCHAMBER_ACP_AGENT_NAME.trim()) || undefined,
+      agentId: 'acp-env',
+      cwd: (typeof process.env.OPENCHAMBER_ACP_CWD === 'string' && process.env.OPENCHAMBER_ACP_CWD.trim()) || undefined,
+    };
+  }
+
+  // Persisted config from the last /initialize (the normal path).
+  const persisted = readAcpAgentConfig();
+  if (persisted) {
+    return {
+      command: persisted.command,
+      args: persisted.args,
+      agentName: persisted.agentName,
+      agentId: persisted.agentId || 'acp-startup',
+      cwd: persisted.cwd,
+    };
+  }
+
+  return null;
 };

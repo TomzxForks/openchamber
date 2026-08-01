@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { AcpClient } from '@/lib/agent/acp-client';
 import { setActiveAgentClient } from '@/lib/agent/active-client';
+import { runtimeFetch } from '@/lib/runtime-fetch';
 import type { AgentBackendType, AcpAgentConfig } from '@/lib/agent/config';
 
 const STORAGE_KEY = 'openchamber.agent-backend.v1';
@@ -52,6 +53,22 @@ const resolveActiveAcpAgent = (state: PersistedState): AcpAgentConfig | null => 
   return state.agents.find((a) => a.id === state.activeAcpAgentId && a.enabled) ?? null;
 };
 
+// Persist to the server so the server can initialize the agent at startup.
+// Called alongside localStorage on every settings change.
+const persistToServer = (state: PersistedState) => {
+  const agent = resolveActiveAcpAgent(state);
+  const body = agent
+    ? { command: agent.command, args: agent.args, agentName: agent.name, agentId: agent.id }
+    : { command: '' }; // empty = clear
+  void runtimeFetch('/api/agent/acp/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(() => {
+    // Best-effort — settings still work locally via localStorage.
+  });
+};
+
 // Apply the selection to the active-client selector. Called on every change.
 const applySelection = (state: PersistedState) => {
   const acpAgent = resolveActiveAcpAgent(state);
@@ -85,6 +102,7 @@ applySelection(initialState);
 
 const commit = (next: PersistedState): Partial<AgentBackendStore> => {
   persist(next);
+  persistToServer(next);
   applySelection(next);
   return next;
 };
