@@ -161,6 +161,25 @@ export class AcpEventSource {
     this._acc = { messageID: null, partID: null, partsCreated: new Set() };
     this._promptAbort = new AbortController();
 
+    // Stamp the user message with the server clock so the footer duration
+    // (completed - userCreatedAt) uses a consistent clock. Without this the
+    // user message keeps the client's optimistic timestamp and any client/
+    // server clock skew inflates or deflates the displayed duration.
+    if (userMessageId) {
+      const now = Date.now();
+      this._publish({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: userMessageId,
+            sessionID: tag,
+            role: 'user',
+            time: { created: now, updated: now },
+          },
+        },
+      });
+    }
+
     try {
       this._session.prompt(text);
       for (;;) {
