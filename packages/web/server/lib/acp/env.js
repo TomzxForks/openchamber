@@ -28,3 +28,24 @@ export const resolveAcpRegistryDir = () => {
   if (override && override.trim()) return override.trim();
   return null;
 };
+
+/**
+ * Startup ACP agent configuration from environment variables. When
+ * OPENCHAMBER_ACP_COMMAND is set, the server initializes the agent connection
+ * at boot (no need to wait for the first session creation from the UI).
+ * Returns null if no command is configured.
+ */
+export const getStartupAcpConfig = () => {
+  const command = process.env.OPENCHAMBER_ACP_COMMAND;
+  if (typeof command !== 'string' || command.trim().length === 0) return null;
+  const argsRaw = process.env.OPENCHAMBER_ACP_ARGS;
+  return {
+    command: command.trim(),
+    args: typeof argsRaw === 'string' && argsRaw.trim().length > 0
+      ? argsRaw.split(',').map((a) => a.trim()).filter(Boolean)
+      : undefined,
+    agentName: (typeof process.env.OPENCHAMBER_ACP_AGENT_NAME === 'string' && process.env.OPENCHAMBER_ACP_AGENT_NAME.trim()) || undefined,
+    agentId: 'acp-startup',
+    cwd: (typeof process.env.OPENCHAMBER_ACP_CWD === 'string' && process.env.OPENCHAMBER_ACP_CWD.trim()) || undefined,
+  };
+};

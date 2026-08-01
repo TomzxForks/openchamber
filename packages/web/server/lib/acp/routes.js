@@ -8,7 +8,7 @@
 // (single-client); initialize replaces any active source.
 
 import express from 'express';
-import { isAcpEnabled } from './env.js';
+import { isAcpEnabled, getStartupAcpConfig } from './env.js';
 import { AcpEventSource } from './acp-event-source.js';
 import { acpTelemetry } from './telemetry.js';
 
@@ -36,12 +36,69 @@ const teardownActive = async () => {
  * @param {import('express').Express} app
  * @param {{ globalMessageStreamHub?: { publishEvent: (payload: unknown, opts?: { directory?: string }) => void } }} options
  */
+/**
+ * Initialize the ACP agent at server startup if OPENCHAMBER_ACP_COMMAND is set.
+ * Spawns the agent, completes the handshake, and creates an initial session so
+ * session/list and prompt are immediately available without waiting for the
+ * first /initialize from the UI.
+ */
+export async function initAcpOnStartup(hub) {
+  if (!isAcpEnabled()) return;
+  const config = getStartupAcpConfig();
+  if (!config) return;
+
+  console.log(`[acp] startup init: command=${config.command}`);
+  const source = new AcpEventSource({
+    hub,
+    directory: config.cwd,
+    agentId: config.agentId,
+    agentName: config.agentName,
+    command: config.command,
+    args: config.args,
+    cwd: config.cwd,
+  });
+
+  try {
+    await source.start();
+    activeSource = source;
+    activeConfig = { command: config.command, agentId: config.agentId };
+    console.log(`[acp] startup init complete: sessionId=${source.sessionID}`);
+    // Fetch sessions for the sidebar.
+    try {
+      const sessions = await source.listSessions(config.cwd);
+      console.log(`[acp] startup session/list returned ${sessions.length} session(s)`);
+    } catch (e) {
+      console.warn(`[acp] startup session/list failed: ${e?.message ?? e}`);
+    }
+  } catch (error) {
+    console.error(`[acp] startup init failed: ${error?.message ?? error}`);
+    await source.stop().catch(() => {});
+  }
+}
+
 export function registerAcpRoutes(app, options = {}) {
   if (!app) return;
   const hub = options.globalMessageStreamHub;
 
   app.post('/api/agent/acp/initialize', express.json({ limit: "1mb" }), async (req, res) => {
     if (!ensureEnabled(res)) return;
+
+    // If the agent was already initialized at startup (or a previous call),
+    // reuse it instead of re-spawning. Return the existing session + sessions.
+    if (activeSource) {
+      try {
+        const sessions = await activeSource.listSessions(req.body?.cwd);
+        return json(res, 200, {
+          sessionID: activeSource.sessionID,
+          backend: 'acp',
+          sessions,
+        });
+      } catch {
+        // Fall through to re-initialize if the existing source is broken.
+        await teardownActive();
+      }
+    }
+
     const body = req.body ?? {};
     const command = typeof body.command === 'string' ? body.command : '';
     if (!command) {
