@@ -126,6 +126,8 @@ const registerMessageEvent = (messageID, sessionID, parentID, ctx, acc) => {
 // the execution duration (completed - created) and the completion state.
 // MUST preserve parentID/agent/model (message.updated replaces the whole info;
 // losing parentID detaches the reply from the turn and it stops rendering).
+// finish MUST be 'stop' (OpenCode convention) — the footer gates on
+// messageFinish === 'stop'; the ACP stopReason does not match.
 const messageCompletionEvent = (acc, sessionID, stopReason) => {
   if (!acc || !acc.messageID) return null;
   const now = Date.now();
@@ -140,7 +142,7 @@ const messageCompletionEvent = (acc, sessionID, stopReason) => {
         ...(acc.messageAgent ? { agent: acc.messageAgent } : {}),
         ...(acc.messageModel ? { modelID: acc.messageModel, model: { id: acc.messageModel, providerID: 'acp' } } : {}),
         time: { created: acc.messageCreatedAt ?? now, completed: now, updated: now },
-        ...(stopReason ? { finish: stopReason } : {}),
+        finish: 'stop',
       },
     },
   };

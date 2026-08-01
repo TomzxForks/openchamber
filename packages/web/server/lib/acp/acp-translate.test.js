@@ -113,7 +113,7 @@ describe('acp-translate: message completion (footer)', () => {
     acpUpdateToEvents(chunk('answer', 'msg-a'), ctx, acc);
     const ev = messageCompletionEvent(acc, 'sess-1', 'end_turn');
     expect(ev.type).toBe('message.updated');
-    expect(ev.properties.info).toMatchObject({ id: 'msg-a', role: 'assistant', parentID: 'user-1', agent: 'pi', finish: 'end_turn' });
+    expect(ev.properties.info).toMatchObject({ id: 'msg-a', role: 'assistant', parentID: 'user-1', agent: 'pi', finish: 'stop' });
     expect(ev.properties.info.time.completed).toBeGreaterThan(0);
     expect(ev.properties.info.time.created).toBeGreaterThan(0);
   });
