@@ -101,6 +101,11 @@ const ensureAssistantMessage = (ctx, acc, acpMessageId, { forceNew = false } = {
 const registerMessageEvent = (messageID, sessionID, parentID, ctx, acc) => {
   const now = Date.now();
   acc.messageCreatedAt = now;
+  // Stash metadata so the completion event can preserve it (message.updated
+  // replaces the whole info; without parentID the turn projection drops it).
+  acc.messageParentID = parentID || null;
+  acc.messageAgent = (ctx && ctx.agentName) || null;
+  acc.messageModel = (ctx && ctx.modelLabel) || null;
   return {
     type: 'message.updated',
     properties: {
@@ -119,6 +124,8 @@ const registerMessageEvent = (messageID, sessionID, parentID, ctx, acc) => {
 
 // Mark the assistant message completed at turn stop so the footer can render
 // the execution duration (completed - created) and the completion state.
+// MUST preserve parentID/agent/model (message.updated replaces the whole info;
+// losing parentID detaches the reply from the turn and it stops rendering).
 const messageCompletionEvent = (acc, sessionID, stopReason) => {
   if (!acc || !acc.messageID) return null;
   const now = Date.now();
@@ -129,6 +136,9 @@ const messageCompletionEvent = (acc, sessionID, stopReason) => {
         id: acc.messageID,
         sessionID,
         role: 'assistant',
+        ...(acc.messageParentID ? { parentID: acc.messageParentID } : {}),
+        ...(acc.messageAgent ? { agent: acc.messageAgent } : {}),
+        ...(acc.messageModel ? { modelID: acc.messageModel, model: { id: acc.messageModel, providerID: 'acp' } } : {}),
         time: { created: acc.messageCreatedAt ?? now, completed: now, updated: now },
         ...(stopReason ? { finish: stopReason } : {}),
       },
