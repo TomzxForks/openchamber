@@ -225,6 +225,21 @@ export class AcpEventSource {
     this._promptAbort?.abort();
   }
 
+  /** List sessions known to the agent (session/list). Returns raw ACP sessions. */
+  async listSessions(cwd) {
+    if (!this._ctx) throw new Error('ACP connection not ready');
+    const response = await this._ctx.request(acp.methods.agent.session.list, {
+      cwd: cwd || this.options.cwd || process.cwd(),
+    });
+    return response?.sessions ?? [];
+  }
+
+  /** Delete a session (session/delete). */
+  async deleteSession(sessionId) {
+    if (!this._ctx) throw new Error('ACP connection not ready');
+    await this._ctx.request(acp.methods.agent.session.delete, { sessionId });
+  }
+
   _publish(event) {
     try {
       this.options.hub?.publishEvent?.(event, { directory: this.options.directory });

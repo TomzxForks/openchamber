@@ -125,6 +125,32 @@ export function registerAcpRoutes(app, options = {}) {
     await teardownActive();
     return json(res, 200, { ok: true });
   });
+
+  // Session lifecycle: list / delete existing agent sessions (FR-9).
+  app.get('/api/agent/acp/sessions', async (req, res) => {
+    if (!ensureEnabled(res)) return;
+    if (!activeSource) return json(res, 200, { sessions: [] });
+    try {
+      const cwd = typeof req.query.cwd === 'string' ? req.query.cwd : undefined;
+      const sessions = await activeSource.listSessions(cwd);
+      return json(res, 200, { sessions });
+    } catch (error) {
+      return json(res, 502, { error: error?.message ?? 'ACP session/list failed' });
+    }
+  });
+
+  app.delete('/api/agent/acp/sessions/:sessionId', async (req, res) => {
+    if (!ensureEnabled(res)) return;
+    if (!activeSource) return json(res, 409, { error: 'No active ACP session' });
+    const sessionId = req.params?.sessionId;
+    if (!sessionId) return json(res, 400, { error: 'Missing sessionId' });
+    try {
+      await activeSource.deleteSession(sessionId);
+      return json(res, 200, { ok: true });
+    } catch (error) {
+      return json(res, 502, { error: error?.message ?? 'ACP session/delete failed' });
+    }
+  });
 }
 
 /** Test helper: reset module-level state between route tests. */

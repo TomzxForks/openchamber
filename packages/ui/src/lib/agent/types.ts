@@ -101,6 +101,10 @@ export interface AgentClient {
   sendMessage(params: SendMessageParams): Promise<string>;
   /** Cancel the in-flight turn for a session (best-effort). */
   abortSession(id: string): Promise<boolean>;
+  /** List sessions known to the backend (for the sidebar). */
+  listSessions?(cwd?: string): Promise<Array<{ id: string; title?: string; [key: string]: unknown }>>;
+  /** Delete a session. */
+  deleteSession?(id: string): Promise<void>;
   /** Reported capabilities. */
   capabilities(): AgentCapabilities;
 }

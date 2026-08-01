@@ -650,6 +650,34 @@ export async function createSession(
     useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     useGlobalSessionsStore.getState().upsertSession(session)
+
+    // When the ACP backend is active, populate the sidebar with the agent's
+    // existing sessions (session/list). The connection only exists after the
+    // first initialize, so this runs post-creation.
+    if (useAgentBackendStore.getState().activeBackend === "acp") {
+      try {
+        const client = getActiveAgentClient();
+        if (client.listSessions) {
+          const acpSessions = await client.listSessions(sessionDirectory ?? undefined);
+          const now = Date.now();
+          for (const s of acpSessions) {
+            if (s.id === session.id) continue; // already upserted above
+            useGlobalSessionsStore.getState().upsertSession({
+              id: s.id,
+              slug: s.id,
+              projectID: "",
+              directory: sessionDirectory ?? "",
+              title: s.title ?? "ACP session",
+              version: "acp",
+              time: { created: now, updated: now },
+            } as Session);
+          }
+        }
+      } catch {
+        // Best-effort sidebar population.
+      }
+    }
+
     return session
   } catch (error) {
     console.error("[session-actions] createSession failed", error)

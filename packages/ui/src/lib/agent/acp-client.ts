@@ -147,4 +147,29 @@ export class AcpClient implements AgentClient {
   capabilities(): AgentCapabilities {
     return { canCancel: true };
   }
+
+  async listSessions(cwd?: string): Promise<Array<{ id: string; title?: string }>> {
+    const query = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+    const response = await runtimeFetch(`/api/agent/acp/sessions${query}`, {
+      method: 'GET',
+      headers: JSON_HEADERS,
+    });
+    if (!response.ok) return [];
+    const data = (await parseJsonSafe(response)) as { sessions?: Array<{ sessionId?: string; title?: string }> } | null;
+    if (!data?.sessions) return [];
+    return data.sessions
+      .filter((s) => typeof s.sessionId === 'string' && s.sessionId.length > 0)
+      .map((s) => ({ id: s.sessionId!, title: s.title }));
+  }
+
+  async deleteSession(id: string): Promise<void> {
+    try {
+      await runtimeFetch(`/api/agent/acp/sessions/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: JSON_HEADERS,
+      });
+    } catch {
+      // Best-effort.
+    }
+  }
 }
