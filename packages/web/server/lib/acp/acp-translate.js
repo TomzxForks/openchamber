@@ -155,6 +155,13 @@ const agentMessageChunkToUpdate = (update, ctx, acc) => {
     return [];
   }
   const sessionID = ctx.sessionID;
+  // Skip a session preamble (pi-acp dumps its skills listing as the first
+  // agent_message_chunk; it also reports it in session meta as startupInfo).
+  // Match by fingerprint so only the duplicate preamble is dropped, not real
+  // replies that happen to start similarly.
+  if (ctx.preambleFingerprint && content.text.slice(0, ctx.preambleFingerprint.length) === ctx.preambleFingerprint) {
+    return [];
+  }
   // Start a new assistant message when a message chunk follows reasoning/tools,
   // so a session preamble (pi-acp's skills listing) and the actual answer render
   // as separate messages instead of being concatenated.

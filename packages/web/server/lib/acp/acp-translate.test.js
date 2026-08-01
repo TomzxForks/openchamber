@@ -152,3 +152,21 @@ describe('acp-translate: deferred updates', () => {
     expect(acpUpdateToEvents({ update: { sessionUpdate: 'usage_update', used: 1, size: 2 } }, ctx)).toEqual([]);
   });
 });
+
+describe('acp-translate: session preamble skip', () => {
+  it('drops an agent_message_chunk matching the preamble fingerprint', () => {
+    const preambleCtx = { ...ctx, preambleFingerprint: 'pi v0.83.0\n---\n\n## Skills\n- /home/tomzx/.pi/agent/skills/website' };
+    const events = acpUpdateToEvents({
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'pi v0.83.0\n---\n\n## Skills\n- /home/tomzx/.pi/agent/skills/website-to-video/SKILL.md\n- more...' } },
+    }, preambleCtx);
+    expect(events).toEqual([]);
+  });
+
+  it('does not drop a real reply that differs from the preamble', () => {
+    const preambleCtx = { ...ctx, preambleFingerprint: 'pi v0.83.0\n---\n\n## Skills' };
+    const events = acpUpdateToEvents({
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '2' } },
+    }, preambleCtx);
+    expect(events.some((e) => e.type === 'message.part.updated')).toBe(true);
+  });
+});

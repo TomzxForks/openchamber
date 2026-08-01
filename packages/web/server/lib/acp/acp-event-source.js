@@ -42,6 +42,25 @@ const extractModelLabel = (session) => {
   return null;
 };
 
+// Some agents (e.g. pi-acp) emit a verbose session preamble (their config/skills
+// listing) as the first agent_message_chunk AND report it in session meta
+// (piAcp.startupInfo). Capture a fingerprint so the translator can drop that
+// duplicate preamble instead of rendering it as the assistant reply.
+const FINGERPRINT_LEN = 80;
+const extractPreambleFingerprint = (session) => {
+  const meta = session?.meta || session?.newSessionResponse?.meta;
+  if (!meta || typeof meta !== 'object') return null;
+  for (const value of Object.values(meta)) {
+    if (value && typeof value === 'object') {
+      const startup = value.startupInfo;
+      if (typeof startup === 'string' && startup.trim().length > 0) {
+        return startup.slice(0, FINGERPRINT_LEN);
+      }
+    }
+  }
+  return null;
+};
+
 /**
  * @typedef {Object} AcpEventSourceOptions
  * @property {object} hub                       Global message-stream hub (publishEvent).
@@ -93,7 +112,8 @@ export class AcpEventSource {
           // Try to capture a model label for the message footer from the session
           // modes/meta (agents report it in different places; best-effort).
           this._modelLabel = extractModelLabel(session);
-          console.log(`[acp] session new sessionId=${session.sessionId} model=${this._modelLabel ?? '(none)'} modes=${JSON.stringify(session.modes ?? null)} meta=${JSON.stringify(session.meta ?? null).slice(0, 400)}`);
+          this._preambleFingerprint = extractPreambleFingerprint(session);
+          console.log(`[acp] session new sessionId=${session.sessionId} model=${this._modelLabel ?? '(none)'} preamble=${this._preambleFingerprint ? 'yes' : 'no'} modes=${JSON.stringify(session.modes ?? null).slice(0, 200)}`);
           // Park for the connection's lifetime; prompts are driven via prompt().
           await new Promise((resolve) => { this._resolveSessionDone = resolve; });
         });
@@ -161,7 +181,7 @@ export class AcpEventSource {
         const notification = message?.notification;
         if (notification) {
           const updateKind = notification?.update?.sessionUpdate;
-          const events = acpUpdateToEvents(notification, { sessionID: tag, parentID: userMessageId, agentName: this._agentLabel, modelLabel: this._modelLabel }, this._acc);
+          const events = acpUpdateToEvents(notification, { sessionID: tag, parentID: userMessageId, agentName: this._agentLabel, modelLabel: this._modelLabel, preambleFingerprint: this._preambleFingerprint }, this._acc);
           console.log(`[acp] update sessionUpdate=${updateKind} translated=${events.length} session=${tag} dir=${this.options.directory ?? '(none)'} raw=${JSON.stringify(notification.update).slice(0, 400)}`);
           for (const event of events) {
             this._publish(event);
