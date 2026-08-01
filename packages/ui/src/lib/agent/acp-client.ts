@@ -35,6 +35,7 @@ type InitializeResponse = {
   sessionID: string;
   capabilities?: unknown;
   backend?: string;
+  sessions?: Array<{ sessionId?: string; title?: string }>;
 };
 
 const JSON_HEADERS = { Accept: "application/json", "Content-Type": "application/json" } as const;
@@ -70,9 +71,17 @@ const buildAcpSession = (sessionID: string, directory: string | null, title: str
 export class AcpClient implements AgentClient {
   readonly backend: AgentBackendType = "acp";
   private readonly config: AcpAgentRuntimeConfig;
+  /** Sessions returned by the last /initialize (for sidebar population). */
+  private _initSessions: Array<{ sessionId?: string; title?: string }> = [];
 
   constructor(config: AcpAgentRuntimeConfig) {
     this.config = config;
+  }
+
+  get initSessions(): Array<{ id: string; title?: string }> {
+    return this._initSessions
+      .filter((s) => typeof s.sessionId === "string" && s.sessionId!.length > 0)
+      .map((s) => ({ id: s.sessionId!, title: s.title }));
   }
 
   async createSession(params?: CreateSessionParams, directory?: string | null): Promise<Session> {
@@ -103,6 +112,11 @@ export class AcpClient implements AgentClient {
       // Distinguish failure from empty success (NFR-4).
       throw new Error("ACP initialize returned no session id");
     }
+
+    // Store the sessions returned by /initialize for the sidebar.
+    this._initSessions = Array.isArray((data as { sessions?: unknown[] }).sessions)
+      ? ((data as { sessions: Array<{ sessionId?: string; title?: string }> }).sessions)
+      : [];
 
     return buildAcpSession(data.sessionID, directory ?? null, params?.title);
   }

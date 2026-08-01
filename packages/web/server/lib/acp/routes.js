@@ -70,10 +70,19 @@ export function registerAcpRoutes(app, options = {}) {
       activeConfig = { command, agentId: body.agentId };
       acpTelemetry.initializeResult(body.agentId, 'success', Date.now() - startedAt);
       acpTelemetry.sessionCreated(body.agentId);
+      // Fetch existing sessions so the sidebar can populate immediately.
+      let existingSessions = [];
+      try {
+        existingSessions = await source.listSessions(body.cwd);
+        console.log(`[acp] session/list returned ${existingSessions.length} session(s)`);
+      } catch (e) {
+        console.warn(`[acp] session/list failed: ${e?.message ?? e}`);
+      }
       return json(res, 200, {
         sessionID: session.sessionId,
         capabilities: source.options,
         backend: 'acp',
+        sessions: existingSessions,
       });
     } catch (error) {
       acpTelemetry.initializeResult(body.agentId, 'error', 0, error?.code);

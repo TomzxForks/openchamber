@@ -652,16 +652,15 @@ export async function createSession(
     useGlobalSessionsStore.getState().upsertSession(session)
 
     // When the ACP backend is active, populate the sidebar with the agent's
-    // existing sessions (session/list). The connection only exists after the
-    // first initialize, so this runs post-creation.
+    // existing sessions (returned by /initialize alongside the new session).
     if (useAgentBackendStore.getState().activeBackend === "acp") {
       try {
         const client = getActiveAgentClient();
-        if (client.listSessions) {
-          const acpSessions = await client.listSessions(sessionDirectory ?? undefined);
+        const acpClient = client as { initSessions?: Array<{ id: string; title?: string }> };
+        if (acpClient.initSessions) {
           const now = Date.now();
-          for (const s of acpSessions) {
-            if (s.id === session.id) continue; // already upserted above
+          for (const s of acpClient.initSessions) {
+            if (s.id === session.id) continue;
             useGlobalSessionsStore.getState().upsertSession({
               id: s.id,
               slug: s.id,
