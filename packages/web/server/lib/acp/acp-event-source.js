@@ -13,6 +13,7 @@
 // session.status (never an empty success — NFR-4).
 
 import { AcpAgentConnection } from './acp-connection.js';
+import * as acp from '@agentclientprotocol/sdk';
 import {
   acpUpdateToEvents,
   acpStopReasonToSessionStatus,
