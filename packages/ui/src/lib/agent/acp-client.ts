@@ -186,4 +186,16 @@ export class AcpClient implements AgentClient {
       // Best-effort.
     }
   }
+
+  async loadSession(sessionId: string): Promise<void> {
+    const response = await runtimeFetch('/api/agent/acp/session/load', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) {
+      const errorBody = await parseJsonSafe(response);
+      throw new Error(typeof errorBody?.error === 'string' ? errorBody.error : `ACP session/load failed (${response.status})`);
+    }
+  }
 }

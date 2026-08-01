@@ -241,6 +241,41 @@ export class AcpEventSource {
     await this._ctx.request(acp.methods.agent.session.delete, { sessionId });
   }
 
+  /**
+   * Load (resume) an existing session. The agent replays conversation history
+   * via session/update notifications, which are translated and published to the
+   * hub so the UI renders the past messages.
+   */
+  async loadSession(sessionId, { userMessageId } = {}) {
+    if (!this._ctx) throw new Error('ACP connection not ready');
+    const tag = sessionId;
+    this._acc = { messageID: null, partID: null, partsCreated: new Set(), lastKind: null };
+
+    const builder = this._ctx.buildSession({ sessionId });
+    await builder.withSession(async (session) => {
+      console.log(`[acp] session/load sessionId=${sessionId}`);
+      for (;;) {
+        const message = await session.nextUpdate();
+        if (message?.kind === 'stop') {
+          const completion = messageCompletionEvent(this._acc, tag, 'end_turn');
+          if (completion) this._publish(completion);
+          break;
+        }
+        const notification = message?.notification;
+        if (notification) {
+          const events = acpUpdateToEvents(notification, {
+            sessionID: tag,
+            parentID: userMessageId,
+            agentName: this._agentLabel,
+            modelLabel: this._modelLabel,
+            preambleFingerprint: this._preambleFingerprint,
+          }, this._acc);
+          for (const event of events) this._publish(event);
+        }
+      }
+    });
+  }
+
   _publish(event) {
     try {
       this.options.hub?.publishEvent?.(event, { directory: this.options.directory });

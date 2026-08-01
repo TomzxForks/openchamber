@@ -103,6 +103,8 @@ export interface AgentClient {
   abortSession(id: string): Promise<boolean>;
   /** List sessions known to the backend (for the sidebar). */
   listSessions?(cwd?: string): Promise<Array<{ id: string; title?: string; [key: string]: unknown }>>;
+  /** Load (resume) an existing session; history streams via events. */
+  loadSession?(sessionId: string): Promise<void>;
   /** Delete a session. */
   deleteSession?(id: string): Promise<void>;
   /** Reported capabilities. */

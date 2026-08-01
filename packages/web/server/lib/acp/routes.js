@@ -213,6 +213,20 @@ export function registerAcpRoutes(app, options = {}) {
     return json(res, 200, { ok: true });
   });
 
+  app.post('/api/agent/acp/session/load', express.json({ limit: "1mb" }), async (req, res) => {
+    if (!ensureEnabled(res)) return;
+    if (!activeSource) return json(res, 409, { error: 'No active ACP session' });
+    const body = req.body ?? {};
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+    if (!sessionId) return json(res, 400, { error: 'Missing sessionId' });
+    try {
+      await activeSource.loadSession(sessionId, { userMessageId: body.userMessageId });
+      return json(res, 200, { ok: true });
+    } catch (error) {
+      return json(res, 502, { error: error?.message ?? 'ACP session/load failed' });
+    }
+  });
+
   // Session lifecycle: list / delete existing agent sessions (FR-9).
   app.get('/api/agent/acp/sessions', async (req, res) => {
     if (!ensureEnabled(res)) return;

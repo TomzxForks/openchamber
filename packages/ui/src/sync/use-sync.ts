@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
+import { getActiveAgentClient } from "@/lib/agent/active-client"
 import { retry } from "./retry"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
 import { pickSessionCacheEvictions } from "./session-cache"
@@ -258,8 +259,15 @@ export function useSync() {
       const hasSession = sessionMatch.found
       // ACP sessions live in the ACP agent, not OpenCode. Their content streams
       // in via the ACP event source, so there is nothing to fetch from OpenCode
-      // (session.get/messages would 500). Skip the OpenCode bootstrap for them.
-      if (hasSession && current.session[sessionMatch.index]?.version === "acp") return
+      // (session.get/messages would 500). Instead, trigger a session/load which
+      // replays the conversation history via translated events.
+      if (hasSession && current.session[sessionMatch.index]?.version === "acp") {
+        const client = getActiveAgentClient();
+        if (client.loadSession) {
+          void client.loadSession(sessionID).catch(() => {});
+        }
+        return;
+      }
       if (cachedReady && hasSession && !force) return
       const shouldLoadMessages = Boolean(!cachedReady || force)
       const shouldFetchSession = shouldFetchSessionForRenderableSync({ hasSession, shouldLoadMessages, force: Boolean(force) })
