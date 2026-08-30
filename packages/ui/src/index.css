@@ -1767,3 +1767,39 @@ html.desktop-runtime [class*="cursor-pointer"] {
 html.desktop-runtime .markdown-content [data-openchamber-file-link="true"] {
   cursor: default;
 }
+
+.run-graph-canvas {
+  background-color: var(--background);
+}
+.run-graph-canvas .react-flow__edge-path {
+  stroke-linecap: round;
+}
+.run-graph-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--primary) !important;
+}
+.run-graph-canvas .react-flow__handle {
+  background-color: var(--primary);
+  border-color: var(--background);
+}
+.run-graph-canvas .react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+}
+.run-graph-canvas .react-flow__controls-button {
+  background-color: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.run-graph-canvas .react-flow__controls-button svg {
+  fill: var(--foreground);
+}
+.run-graph-canvas .react-flow__controls-button:hover {
+  background-color: var(--accent, var(--muted));
+}
+.run-graph-canvas .react-flow__attribution {
+  background: var(--background);
+}
+.run-graph-canvas .react-flow__attribution a {
+  color: var(--muted-foreground);
+}

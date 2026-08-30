@@ -5,15 +5,13 @@ import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getWorktreeSetupWaitEnabled, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
-import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { useDirectoryStore } from './useDirectoryStore';
-import { useProjectsStore } from './useProjectsStore';
 import { useSnippetsStore } from './useSnippetsStore';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
+import { resolveActiveProjectRef } from '@/lib/activeProject';
 import { getMultiRunSessionTitle } from '@/lib/multirun/title';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 
@@ -43,7 +41,7 @@ const normalizePath = (value: string): string => {
   return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
 };
 
-const registerCreatedSession = (session: Session, directory: string): Session => {
+export const registerCreatedSession = (session: Session, directory: string): Session => {
   const normalizedDirectory = normalizePath(directory);
   const sessionDirectory = (session as Session & { directory?: string | null }).directory;
   const sessionWithDirectory = typeof sessionDirectory === 'string' && sessionDirectory.trim().length > 0
@@ -78,23 +76,6 @@ const registerCreatedSession = (session: Session, directory: string): Session =>
   }
 
   return sessionWithDirectory;
-};
-
-const resolveActiveProject = (): ProjectRef | null => {
-  const projectsState = useProjectsStore.getState();
-  const activeProjectId = projectsState.activeProjectId;
-  if (!activeProjectId) return null;
-
-  const project = projectsState.projects.find((entry) => entry.id === activeProjectId);
-  if (project?.path) return { id: project.id, path: project.path };
-
-  const currentDirectory = useDirectoryStore.getState().currentDirectory ?? null;
-  if (currentDirectory && currentDirectory.trim().length > 0) {
-    const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
-    return { id: `path:${normalized}`, path: normalized };
-  }
-
-  return null;
 };
 
 interface MultiRunState {
@@ -147,7 +128,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
         set({ isLoading: true, error: null });
 
         try {
-          const project = resolveActiveProject();
+          const project = resolveActiveProjectRef();
           if (!project) {
             set({ error: 'Select a project', isLoading: false });
             return null;

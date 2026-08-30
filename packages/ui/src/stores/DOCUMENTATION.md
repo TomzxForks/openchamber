@@ -37,6 +37,23 @@ Examples:
 - `useDirectoryStore.ts`
 - `useFeatureFlagsStore.ts`
 - `useUpdateStore.ts`
+- `useRunGraphStore.ts`
+
+These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
+
+`useRunGraphStore.ts` owns the multi-run graphs surface (Graphs tab): the saved
+graph list, the in-memory editing draft, and the active run state published by
+`lib/runGraph/executor.ts`. Graph definitions persist per project through
+`openchamberConfig.getMultiRunGraphs` / `saveMultiRunGraphs`; the draft is
+memory-only until an explicit save. Instance run phases are derived from the
+global live session-status index by the executor, so the store publishes only
+on lifecycle transitions, not per streaming frame. During a run the store also
+owns the form-input channel for form nodes: the executor's form requests are
+held as resolvers keyed by node id, `submitRunForm` / `cancelRunForm` resolve
+them, and outstanding resolvers are cancelled when a run stops or settles. The
+store never mutates session/message state; it only creates sessions via the
+shared multirun registration path (`registerCreatedSession`) and dispatches
+prompts through `routeMessage`.
 
 These stores coordinate visible app state, navigation, selected tabs, dialogs, and lightweight feature flags.
 

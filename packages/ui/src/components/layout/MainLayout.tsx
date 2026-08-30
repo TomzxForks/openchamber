@@ -40,6 +40,7 @@ const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView')
 const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then(m => ({ default: m.DiffView })));
 const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then(m => ({ default: m.FilesView })));
 const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/DiagramView').then(m => ({ default: m.DiagramView })));
+const GraphsView = lazyWithChunkRecovery(() => import('@/components/views/GraphsView').then(m => ({ default: m.GraphsView })));
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
@@ -261,9 +262,10 @@ export const MainLayout: React.FC = () => {
 
     const secondaryView = React.useMemo(() => {
         // Desktop surfaces live in the context panel; the only full-view
-        // overlays left there are the terminal (promoted by project actions)
-        // and the diagram viewer. Mobile keeps the full tab set.
-        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+        // overlays left there are the terminal (promoted by project actions),
+        // the diagram viewer, and the run-graph canvas. Mobile keeps the full
+        // tab set.
+        if (!isMobile && activeMainTab !== 'terminal' && activeMainTab !== 'diagram' && activeMainTab !== 'graphs') {
             return null;
         }
         switch (activeMainTab) {
@@ -281,6 +283,8 @@ export const MainLayout: React.FC = () => {
                 return <React.Suspense fallback={null}><ProjectContextPanel /></React.Suspense>;
             case 'diagram':
                 return <React.Suspense fallback={null}><DiagramView /></React.Suspense>;
+            case 'graphs':
+                return <React.Suspense fallback={null}><GraphsView /></React.Suspense>;
             default:
                 return null;
         }

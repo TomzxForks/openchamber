@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -12,6 +13,13 @@ import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from
 
 /** Chip height class - shared between chips and add button */
 const CHIP_HEIGHT_CLASS = 'h-7';
+
+/** Fixed popup dimensions and gaps shared by the measurement and rendering paths */
+const POPUP_MAX_WIDTH = 420;
+const POPUP_VIEWPORT_MARGIN = 8;
+const POPUP_GAP = 4;
+/** Reserved chrome (search + footer) excluded from the scrollable list height */
+const POPUP_CHROME_HEIGHT = 112;
 
 /** UI-only type with instanceId for React keys and duplicate tracking */
 export interface ModelSelectionWithId {
@@ -82,6 +90,13 @@ export interface ModelMultiSelectProps {
   triggerIcon?: React.ReactNode;
 }
 
+/** Fixed viewport anchor for the portaled popup; one of top/bottom is set per dropdownSide */
+interface PopupPosition {
+  left: number;
+  top?: number;
+  bottom?: number;
+}
+
 /**
  * Model selector for multi-run (allows selecting same model multiple times).
  */
@@ -111,7 +126,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [availableHeight, setAvailableHeight] = React.useState<number | null>(null);
-  const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const [popupPosition, setPopupPosition] = React.useState<PopupPosition | null>(null);
+  const popupRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const isSingleSelect = maxModels === 1;
   const canAddModel = maxModels === undefined || selectedModels.length < maxModels || isSingleSelect;
@@ -134,39 +150,68 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     return sameModels.findIndex(m => m.instanceId === model.instanceId) + 1;
   }, [selectedModels]);
 
-  // Calculate available height: multi-run opens upward inside a scroller; fusion opens downward and may extend past the dialog.
-  React.useEffect(() => {
-    if (!isOpen || !triggerRef.current) return;
+  // Measure while open: the popup is portaled to body with fixed positioning,
+  // so it must be anchored to the live trigger rect and clamped to the
+  // viewport. availableHeight is only the scrollable model list; reserve room
+  // for search + keyboard hint chrome.
+  const measurePopup = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
 
-    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const triggerRect = trigger.getBoundingClientRect();
 
     if (dropdownSide === 'bottom') {
-      const viewportHeight = window.visualViewport?.height ?? document.documentElement.clientHeight ?? window.innerHeight;
       const spaceBelow = viewportHeight - triggerRect.bottom - 16;
-      // availableHeight is only the scrollable model list; reserve room for search + keyboard hint chrome.
-      const listSpaceBelow = spaceBelow - 112;
-      setAvailableHeight(Math.max(160, Math.min(320, listSpaceBelow)));
-      return;
+      setAvailableHeight(Math.max(160, Math.min(320, spaceBelow - POPUP_CHROME_HEIGHT)));
+    } else {
+      // Find the nearest dialog or overflow ancestor to constrain within
+      let container: HTMLElement | null = trigger.parentElement;
+      while (container) {
+        if (container.getAttribute('role') === 'dialog' || container.hasAttribute('data-scroll-shadow')) {
+          break;
+        }
+        const style = getComputedStyle(container);
+        if (style.overflow === 'auto' || style.overflow === 'hidden' || style.overflowY === 'auto' || style.overflowY === 'hidden') {
+          break;
+        }
+        container = container.parentElement;
+      }
+
+      const topBound = container ? container.getBoundingClientRect().top : 0;
+      const spaceAbove = triggerRect.top - topBound - 16;
+      setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
     }
 
-    // Find the nearest dialog or overflow ancestor to constrain within
-    let container: HTMLElement | null = triggerRef.current.parentElement;
-    while (container) {
-      if (container.getAttribute('role') === 'dialog' || container.hasAttribute('data-scroll-shadow')) {
-        break;
-      }
-      const style = getComputedStyle(container);
-      if (style.overflow === 'auto' || style.overflow === 'hidden' || style.overflowY === 'auto' || style.overflowY === 'hidden') {
-        break;
-      }
-      container = container.parentElement;
-    }
+    const left = Math.max(
+      POPUP_VIEWPORT_MARGIN,
+      Math.min(triggerRect.left, viewportWidth - Math.min(POPUP_MAX_WIDTH, viewportWidth - POPUP_VIEWPORT_MARGIN * 2) - POPUP_VIEWPORT_MARGIN),
+    );
+    const nextPosition: PopupPosition = dropdownSide === 'top'
+      ? { left, bottom: viewportHeight - triggerRect.top + POPUP_GAP }
+      : { left, top: triggerRect.bottom + POPUP_GAP };
+    setPopupPosition((previous) => (
+      previous
+      && previous.left === nextPosition.left
+      && previous.top === nextPosition.top
+      && previous.bottom === nextPosition.bottom
+        ? previous
+        : nextPosition
+    ));
+  }, [dropdownSide]);
 
-    const topBound = container ? container.getBoundingClientRect().top : 0;
-    const spaceAbove = triggerRect.top - topBound - 16;
-    // Cap: min 150, max 300
-    setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
-  }, [dropdownSide, isOpen]);
+  React.useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    measurePopup();
+    window.addEventListener('resize', measurePopup);
+    document.addEventListener('scroll', measurePopup, true);
+    return () => {
+      window.removeEventListener('resize', measurePopup);
+      document.removeEventListener('scroll', measurePopup, true);
+    };
+  }, [isOpen, measurePopup]);
 
   React.useEffect(() => {
     if (!canAddModel && isOpen) {
@@ -175,15 +220,17 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     }
   }, [canAddModel, isOpen]);
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside the trigger and the portaled popup
   React.useEffect(() => {
     if (!isOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-        setSearchQuery('');
-      }
+      // SAFETY: mousedown targets on document are DOM nodes; contains() only needs Node identity.
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (popupRef.current?.contains(target)) return;
+      setIsOpen(false);
+      setSearchQuery('');
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -228,7 +275,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5 items-center">
         {/* Add model button (dropdown trigger) */}
-        <div className={cn('relative', containerClassName)} ref={dropdownRef}>
+        <div className={cn('relative', containerClassName)}>
           <button
             ref={triggerRef}
             type="button"
@@ -247,14 +294,18 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             {addButtonLabel ?? t('multirun.modelMultiSelect.actions.addModel')}
           </button>
 
-          {isOpen ? (
+          {isOpen && popupPosition ? createPortal(
             <div
+              ref={popupRef}
               className={cn(
-                'absolute left-0 z-50 w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg',
-                dropdownSide === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
+                'fixed z-[120] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg',
+                'w-[min(420px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)]',
                 dropdownClassName,
               )}
               style={{
+                left: popupPosition.left,
+                top: popupPosition.top,
+                bottom: popupPosition.bottom,
                 background: 'linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))',
               }}
             >
@@ -282,7 +333,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                   setSearchQuery('');
                 }}
               />
-            </div>
+            </div>,
+            document.body,
           ) : null}
         </div>
 

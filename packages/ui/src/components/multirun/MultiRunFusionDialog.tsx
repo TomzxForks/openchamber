@@ -12,8 +12,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
-import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
-import { flattenAssistantTextParts } from '@/lib/messages/messageText';
+import { getLastAssistantText } from '@/lib/multirun/sessionOutput';
 import { getFusionSessionTitle, parseMultiRunSessionTitle } from '@/lib/multirun/title';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { AgentSelector } from './AgentSelector';
@@ -33,36 +32,6 @@ const buildSourcePart = (source: FusionSource, text: string, index: number): str
 const getSessionProjectDirectory = (sessionId: string, directory: string | null): string | null => {
   const metadata = useSessionUIStore.getState().getWorktreeMetadata(sessionId);
   return metadata?.projectDirectory ?? directory;
-};
-
-const getLastAssistantText = async (source: FusionSource): Promise<string> => {
-  const directory = source.directory ?? undefined;
-  const messages = getSyncMessages(source.session.id, directory);
-
-  if (messages.length === 0 && source.directory) {
-    const result = await opencodeClient.withDirectory(source.directory, () =>
-      opencodeClient.getSdkClient().session.messages({
-        sessionID: source.session.id,
-        directory: source.directory ?? undefined,
-        limit: 50,
-      })
-    );
-    const records = result.data ?? [];
-    for (let index = records.length - 1; index >= 0; index -= 1) {
-      const record = records[index] as { info?: { role?: string }; parts?: unknown[] };
-      if (record.info?.role !== 'assistant') continue;
-      return flattenAssistantTextParts((record.parts ?? []) as Parameters<typeof flattenAssistantTextParts>[0]).trim();
-    }
-    return '';
-  }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role !== 'assistant') continue;
-    return flattenAssistantTextParts(getSyncParts(message.id, directory)).trim();
-  }
-
-  return '';
 };
 
 export function MultiRunFusionDialog({
@@ -144,7 +113,7 @@ export function MultiRunFusionDialog({
     if (!parsed || !providerID || !modelID) return;
     setIsStarting(true);
     try {
-      const sourceTexts = await Promise.all(sources.map((source) => getLastAssistantText(source)));
+      const sourceTexts = await Promise.all(sources.map((source) => getLastAssistantText(source.session.id, source.directory)));
       const usableSources = sources
         .map((source, index) => ({ source, text: sourceTexts[index] ?? '' }))
         .filter((item) => item.text.trim().length > 0);

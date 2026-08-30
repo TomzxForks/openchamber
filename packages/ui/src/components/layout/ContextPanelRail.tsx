@@ -252,6 +252,9 @@ export const ContextPanelRail: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
   const changedFilesCount = gitStatus?.files.length ?? 0;
+  const activeMainTab = useUIStore((state) => state.activeMainTab);
+  const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
+  const graphsActive = activeMainTab === 'graphs';
 
   const surfaces = React.useMemo(() => {
     return getVisibleContextRailSurfaces({
@@ -331,6 +334,30 @@ export const ContextPanelRail: React.FC = () => {
           })}
         </SortableContext>
       </DndContext>
+
+      <div className="mt-1 flex h-px w-6 bg-border" aria-hidden="true" />
+      <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setActiveMainTab(graphsActive ? 'chat' : 'graphs')}
+            aria-label={t('layout.mainTab.graphs')}
+            aria-pressed={graphsActive}
+            className={cn(
+              'flex h-9 w-9 select-none items-center justify-center rounded-md transition-colors',
+              graphsActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon name="node-tree" className="h-[18px] w-[18px]" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="left" sideOffset={8}>
+          <div className="flex flex-col gap-0.5">
+            <span>{t('layout.mainTab.graphs')}</span>
+            <span className="typography-micro text-muted-foreground">{t('commandPalette.item.openGraphs')}</span>
+          </div>
+        </TooltipContent>
+      </Tooltip>
     </nav>
   );
 };

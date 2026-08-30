@@ -1707,6 +1707,7 @@ export const Header: React.FC<HeaderProps> = ({
         { id: 'terminal', label: t('layout.mainTab.terminal'), icon: "terminal-box" },
         { id: 'context', label: t('layout.mainTab.context'), icon: "file-list-2" },
         { id: 'diagram', label: t('layout.mainTab.diagram'), icon: 'file' },
+        { id: 'graphs', label: t('layout.mainTab.graphs'), icon: "git-branch" },
       );
 
       return base;
@@ -1724,7 +1725,7 @@ export const Header: React.FC<HeaderProps> = ({
     // Project actions may intentionally promote the terminal to the desktop
     // main view, and diagram clicks open the diagram viewer; every other
     // legacy main tab now lives in the context panel on desktop.
-    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram') {
+    if (!isMobile && activeMainTab !== 'chat' && activeMainTab !== 'terminal' && activeMainTab !== 'diagram' && activeMainTab !== 'graphs') {
       setActiveMainTab('chat');
     }
   }, [activeMainTab, isMobile, setActiveMainTab]);

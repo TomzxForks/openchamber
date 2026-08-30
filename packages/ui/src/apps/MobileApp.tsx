@@ -7,6 +7,7 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { ChatView } from '@/components/views/ChatView';
+import { GraphsView } from '@/components/views/GraphsView';
 import { PlanView } from '@/components/views/PlanView';
 import { SettingsView } from '@/components/views/SettingsView';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -43,6 +44,7 @@ import {
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useRunGraphStore } from '@/stores/useRunGraphStore';
 import { SyncProvider } from '@/sync/sync-context';
 
 import { SyncAppEffects } from './AppEffects';
@@ -97,7 +99,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
-type MobileSurface = 'instances' | 'settings' | 'update';
+type MobileSurface = 'instances' | 'settings' | 'update' | 'graphs';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t } = useI18n();
@@ -439,6 +441,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           <MobileHeader
             onOpenSessions={() => (isTabletLayout ? toggleSidebar() : setSessionsSheetOpen(true))}
             onOpenWorkspace={() => setWorkspaceOpen(true)}
+            onOpenGraphs={() => openSurface('graphs')}
             compactTitle={isTabletLayout}
           />
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
@@ -586,6 +589,27 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                   (page) => !(showCapacitorOnlyFeatures && page === 'about'),
                 )}
                 onClose={closeSurface}
+              />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {activeSurface === 'graphs' ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeSurface}
+            ariaLabel={t('layout.mainTab.graphs')}
+            title={t('layout.mainTab.graphs')}
+          >
+            <ErrorBoundary>
+              <GraphsView
+                onNavigateToSession={(sessionId) => {
+                  closeSurface();
+                  const directory = useRunGraphStore.getState().sessionIndex[sessionId]?.directory ?? null;
+                  useSessionUIStore.getState().setCurrentSession(sessionId, directory);
+                }}
               />
             </ErrorBoundary>
           </MobileFullscreenSurface>

@@ -46,6 +46,15 @@ export default defineConfig({
       },
     }),
     {
+      name: 'inject-build-marker',
+      transformIndexHtml(html) {
+        const buildId = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+        const badge = `<div id="build-marker" style="position:fixed;bottom:2px;left:4px;font-size:9px;line-height:1;opacity:.45;z-index:2147483647;pointer-events:none;font-family:monospace">b${buildId}</div>`;
+        const log = `<script>window.__OPENCHAMBER_BUILD_ID__='b${buildId}';console.info('[openchamber] build b${buildId}');</script>`;
+        return html.replace('</body>', `${log}${badge}</body>`);
+      },
+    },
+    {
       name: 'inject-react-scan-script',
       transformIndexHtml() {
         if (!enableReactScan) {

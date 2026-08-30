@@ -232,6 +232,15 @@ export const CommandPalette: React.FC = () => {
         }),
       },
       {
+        id: 'open-graphs',
+        title: t('commandPalette.item.openGraphs'),
+        icon: <Icon name="git-branch" className="mr-2 h-4 w-4" />,
+        searchText: t('commandPalette.item.openGraphs'),
+        onSelect: run(() => {
+          setActiveMainTab('graphs');
+        }),
+      },
+      {
         id: 'open-settings',
         title: t('commandPalette.item.openSettings'),
         icon: <Icon name="settings-3" className="mr-2 h-4 w-4" />,

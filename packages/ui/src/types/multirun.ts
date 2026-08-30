@@ -1,4 +1,4 @@
-interface MultiRunModelSelection {
+export interface MultiRunModelSelection {
   providerID: string;
   modelID: string;
   displayName?: string;
