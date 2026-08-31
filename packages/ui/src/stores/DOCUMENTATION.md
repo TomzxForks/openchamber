@@ -43,9 +43,15 @@ These stores coordinate visible app state, navigation, selected tabs, dialogs, a
 
 `useRunGraphStore.ts` owns the multi-run graphs surface (Graphs tab): the saved
 graph list, the in-memory editing draft, and the active run state published by
-`lib/runGraph/executor.ts`. Graph definitions persist per project through
-`openchamberConfig.getMultiRunGraphs` / `saveMultiRunGraphs`; the draft is
-memory-only until an explicit save. Instance run phases are derived from the
+`lib/runGraph/executor.ts`. Graph definitions persist as one YAML file per
+graph under `<project>/.agents/workflows/<slug>.yaml` or the global
+`~/.agents/workflows/<slug>.yaml`, reached through `lib/runGraph/workflowsApi.ts`
+(`/api/config/workflows`); the store tracks each graph's backing file
+(`graphFiles`) so saves update in place, renames move the file, and saves can
+pick a scope (project default). The session link index stays in the
+client-owned `openchamberConfig` (`multiRunSessionIndex`) because it is
+machine-local. The draft is memory-only until an explicit save. Instance run
+phases are derived from the
 global live session-status index by the executor, so the store publishes only
 on lifecycle transitions, not per streaming frame. During a run the store also
 owns the form-input channel for form nodes: the executor's form requests are

@@ -3,17 +3,18 @@ import type {
   MultiRunSessionLink,
   RunGraphDefinition,
   RunGraphEdge,
+  RunGraphFileMeta,
   RunGraphFormField,
   RunGraphFormNode,
   RunGraphNode,
   RunGraphNodeInput,
+  RunGraphScope,
   RunGraphWorktree,
   RunModelInstance,
 } from '@/types/runGraph';
 import { MAX_INSTANCES_PER_NODE, RUN_GRAPH_FORM_FIELD_TYPES, RUN_GRAPH_INPUT_NAME_PATTERN } from '@/types/runGraph';
 import { createRunGraphEntityId } from './ids';
 
-const MAX_RUN_GRAPHS = 50;
 export const MAX_NODES_PER_GRAPH = 32;
 const MAX_WORKTREES_PER_GRAPH = 16;
 const MAX_EDGES_PER_GRAPH = 120;
@@ -119,9 +120,7 @@ const graphSchema = z.object({
   updatedAt: z.number().finite().catch(0),
 });
 
-const graphListSchema = z.array(graphSchema).catch([]);
-
-export const MAX_SESSION_LINKS = 200;
+const MAX_SESSION_LINKS = 200;
 
 const sessionLinkSchema = z.object({
   graphId: z.string().catch(''),
@@ -451,18 +450,42 @@ export const sanitizeRunGraph = (value: RunGraphDefinition | null | undefined): 
   return sanitizeParsedGraph(parsed.data);
 };
 
-export const sanitizeRunGraphs = (value: RunGraphDefinition[] | undefined): RunGraphDefinition[] => {
-  const parsed = graphListSchema.safeParse(value);
-  if (!parsed.success) return [];
+/** Maximum number of workflow files shown across both scopes. */
+const MAX_RUN_GRAPHS = 50;
 
+export interface RunGraphFileEntryInput {
+  /** File name stem of the backing YAML file. */
+  fileName: string;
+  scope: RunGraphScope;
+  /** Raw file content as parsed by the server; garbage is absorbed. */
+  graph: RunGraphDefinition | null | undefined;
+}
+
+export interface SanitizedRunGraphFiles {
+  /** Sanitized graphs, in entry order (callers pass project scope first). */
+  graphs: RunGraphDefinition[];
+  /** Backing file metadata keyed by graph id. */
+  fileMeta: Record<string, RunGraphFileMeta>;
+}
+
+/**
+ * Sanitize workflow file entries into trusted graphs plus per-file metadata.
+ * Unrecoverable files are skipped so one bad file cannot hide the others.
+ * Callers order entries project-first; a graph id seen twice (the same file
+ * copied across scopes) keeps only its first occurrence.
+ */
+export const sanitizeRunGraphFileEntries = (entries: RunGraphFileEntryInput[]): SanitizedRunGraphFiles => {
   const graphs: RunGraphDefinition[] = [];
+  const fileMeta: Record<string, RunGraphFileMeta> = {};
   const seenIds = new Set<string>();
-  for (const candidate of parsed.data) {
+  for (const entry of entries) {
     if (graphs.length >= MAX_RUN_GRAPHS) break;
-    const graph = sanitizeParsedGraph(candidate);
+    if (!entry.fileName) continue;
+    const graph = sanitizeRunGraph(entry.graph);
     if (!graph || seenIds.has(graph.id)) continue;
     seenIds.add(graph.id);
     graphs.push(graph);
+    fileMeta[graph.id] = { fileName: entry.fileName, scope: entry.scope };
   }
-  return graphs;
+  return { graphs, fileMeta };
 };

@@ -20,6 +20,8 @@ import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
+import { registerWorkflowRoutes } from './workflow-routes.js';
+import { WORKFLOW_SCOPE, discoverWorkflows, saveWorkflow, deleteWorkflow } from './workflows.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
@@ -297,6 +299,17 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isClawdHubSource,
       getProfiles,
       getProfile,
+    });
+
+    registerWorkflowRoutes(app, {
+      path,
+      os,
+      resolveOptionalProjectDirectory,
+      resolveProjectDirectory,
+      discoverWorkflows,
+      saveWorkflow,
+      deleteWorkflow,
+      WORKFLOW_SCOPE,
     });
 
     registerQuotaRoutes(app, { getQuotaProviders });

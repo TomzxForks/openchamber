@@ -5,8 +5,12 @@ template, named inputs, and 1..5 model instances; upstream outputs connect
 into a named input, and templates reference them as `{{name}}` variables.
 Form nodes declare fields (text, textarea, number, date, time, select,
 slider, checkbox, unlimited count); each field is an output port whose value
-can be wired into run inputs. Definitions persist per project in the
-client-owned `openchamberConfig` JSON (`multiRunGraphs` section).
+can be wired into run inputs. Definitions persist as one YAML file per graph
+(`<slug>.yaml`) under the project `.agents/workflows` directory or the global
+`~/.agents/workflows` directory, mirroring how skills are stored; the server
+(`packages/web/server/lib/opencode/workflows.js`) owns discovery and file
+I/O through `/api/config/workflows`, and project files shadow same-named
+global files.
 
 ## Module map
 
@@ -16,7 +20,8 @@ client-owned `openchamberConfig` JSON (`multiRunGraphs` section).
 | `template.ts` | The only template language: `{{name}}`, `{{name[N]}}`, `{{name.join("sep")}}` where `name` is a declared input. Multiple edges into one input produce ordered values, `{{name}}` joins them with the default separator. No JS evaluation, ever. Unknown names and out-of-range indexes fail render. |
 | `validate.ts` | Static analysis: cycles (Kahn, instance-level edges), unique titles, dangling edge/port/instance refs, input names (missing/invalid/duplicate), template references vs declared inputs (unknown name, unconnected input, index range), form field issues (missing/duplicate titles, select options, slider bounds), shared-worktree warnings, orphan worktrees. Emits `RunGraphIssueCode` values consumed by the i18n panel. |
 | `executor.ts` | `RunGraphExecutor`: ready-queue scheduler. An instance starts when every feeding instance is `done` and its worktree is ready; values are gathered per named input in edge order. Form nodes pause the run: a form is requested (via `deps.requestFormValues`) only once a consumer run is otherwise ready, submitted values become the field outputs, cancel fails the form and blocks its consumers. Completion is derived from the global live session-status index (absence = idle); a finished session with no assistant text is `failed` and blocks only its descendants. All dependency calls are injected via `RunGraphExecutorDeps`. |
-| `sanitize.ts` | The persisted-JSON boundary. Zod schemas parse `multiRunGraphs`, then pure steps enforce caps (50 graphs / 32 nodes / 16 worktrees / 5 instances per node / 20 select options) and referential cleanup (dangling edges, ports, bindings, and pool overrides are dropped). Nodes persisted without `kind` read back as run nodes. Legacy graphs (edges without a target port) are migrated to an input literally named `inputs`, so old templates keep working. Keep runtime-garbage tolerance here and nowhere else. |
+| `sanitize.ts` | The persisted-YAML boundary. Zod schemas parse one graph's file content, then pure steps enforce caps (50 graphs / 32 nodes / 16 worktrees / 5 instances per node / 20 select options) and referential cleanup (dangling edges, ports, bindings, and pool overrides are dropped). Nodes persisted without `kind` read back as run nodes. Legacy graphs (edges without a target port) are migrated to an input literally named `inputs`, so old templates keep working. Keep runtime-garbage tolerance here and nowhere else. |
+| `workflowsApi.ts` | The only graph storage client: lists, saves, and deletes YAML workflow files through `/api/config/workflows` (`runtimeFetch`, project `directory` scoping). Listing failures throw (never an authoritative empty list); saves pass `previousName` so the server overwrites only a file the client actually loaded, and renames remove the old file. Unparsable files are skipped server-side. |
 | `editorGraph.ts` | Pure graph-editing operations used by the store; cascade deletes (node removal drops its edges/bindings, instance/input/field removal drops its edges, worktree removal strips pool overrides). |
 | `slug.ts`, `ids.ts` | Worktree name slugs and prefixed entity ids. |
 
@@ -68,6 +73,11 @@ client-owned `openchamberConfig` JSON (`multiRunGraphs` section).
 - Session creation goes through `registerCreatedSession` (shared with
   `useMultiRunStore`) so directory routing, child-store seeding, and global
   cache upsert stay in one owner. Prompt dispatch goes through `routeMessage`.
+- Graph files are user-authored artifacts: the file name stem (graph name
+  slug) identifies the file, the YAML content holds the graph id, and the
+  store keeps the loaded file name/scope (`graphFiles`) so repeated saves
+  update in place instead of clobbering unloaded files. Project scope wins
+  over the global scope when both hold the same name.
 - `existing` worktree nodes store machine-local paths; validation warns at run
   time when the path is missing from `listProjectWorktrees`. `new` worktrees
   reuse-by-name before creating.

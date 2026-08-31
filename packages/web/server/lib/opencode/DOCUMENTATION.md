@@ -387,6 +387,34 @@ an authoritative loopback callback URL even when OpenChamber binds port `0`.
     `.agents/skills` and `.opencode/skills` remain discoverable when the client
     omits `directory`. Requests without any project still list user-scoped skills.
 
+## Public exports (workflows.js)
+- Multi-run graph storage as one YAML file per graph under the project
+  `.agents/workflows/` directory or the global `~/.agents/workflows/`
+  directory (same convention as `.agents/skills`).
+- `discoverWorkflows(workingDirectory, { homeDir })`: lists valid
+  `<slug>.yaml|.yml` files from both scopes; project files shadow same-named
+  global files; unparsable or non-mapping files are skipped so one bad file
+  cannot hide the others (bounded by file size and file-count caps).
+- `saveWorkflow(name, graph, { workingDirectory, scope, previousName, homeDir })`:
+  writes `<name>.yaml` (mkdir recursive). Without `previousName` the save
+  refuses to overwrite an existing file (`WORKFLOW_EXISTS`), so a new graph
+  cannot silently replace a file it never loaded. With a different
+  `previousName` the old file is removed after a successful write (rename).
+- `deleteWorkflow(name, { workingDirectory, scope, homeDir })`: removes the
+  file; throws `WORKFLOW_NOT_FOUND` when nothing matches.
+- Names must match the skill-name pattern (1-64 lowercase alphanumerics with
+  hyphens, no leading/trailing hyphen).
+
+## Public exports (workflow-routes.js)
+- `registerWorkflowRoutes(app, dependencies)`: registers graph workflow routes:
+  - `GET /api/config/workflows?directory=` lists `{ name, scope, graph }`
+    entries, project scope first.
+  - `PUT /api/config/workflows/:name?directory=` with
+    `{ scope, graph, previousName? }` saves a graph; project scope requires a
+    resolvable directory; `WORKFLOW_EXISTS` conflicts return 409.
+  - `DELETE /api/config/workflows/:name?scope=&directory=` deletes a graph
+    file; missing files return 404.
+
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
 - Owns:

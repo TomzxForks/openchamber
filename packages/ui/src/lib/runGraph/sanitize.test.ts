@@ -3,7 +3,7 @@ import type { RunGraphDefinition, RunGraphRunNode } from '@/types/runGraph';
 import {
   MAX_NODES_PER_GRAPH,
   sanitizeRunGraph,
-  sanitizeRunGraphs,
+  sanitizeRunGraphFileEntries,
   sanitizeRunSessionIndex,
 } from './sanitize';
 
@@ -433,24 +433,39 @@ describe('sanitizeRunSessionIndex', () => {
   });
 });
 
-describe('sanitizeRunGraphs', () => {
-  test('returns an empty array for malformed input', () => {
-    expect(sanitizeRunGraphs(undefined)).toEqual([]);
-    expect(sanitizeRunGraphs(unsafeList('nope'))).toEqual([]);
-    expect(sanitizeRunGraphs(unsafeList([null, 3, { id: '' }]))).toEqual([]);
+describe('sanitizeRunGraphFileEntries', () => {
+  test('skips entries without a file name or a recoverable graph', () => {
+    expect(sanitizeRunGraphFileEntries([])).toEqual({ graphs: [], fileMeta: {} });
+    expect(
+      sanitizeRunGraphFileEntries([
+        { fileName: '', scope: 'project', graph: validGraph },
+        { fileName: 'bad', scope: 'project', graph: unsafeList({ id: '' })[0] },
+        { fileName: 'empty', scope: 'user', graph: null },
+      ]),
+    ).toEqual({ graphs: [], fileMeta: {} });
   });
 
-  test('deduplicates ids and preserves order', () => {
+  test('keeps file metadata keyed by graph id and deduplicates ids project-first', () => {
     const a = { ...structuredClone(validGraph), id: 'graph_a' };
-    const result = sanitizeRunGraphs([a, { ...a }, validGraph]);
-    expect(result.map((graph) => graph.id)).toEqual(['graph_a', 'graph_1']);
+    const result = sanitizeRunGraphFileEntries([
+      { fileName: 'shared', scope: 'project', graph: a },
+      { fileName: 'shared-copy', scope: 'user', graph: { ...a, name: 'Copy' } },
+      { fileName: 'valid', scope: 'user', graph: validGraph },
+    ]);
+    expect(result.graphs.map((graph) => graph.id)).toEqual(['graph_a', 'graph_1']);
+    expect(result.fileMeta).toEqual({
+      graph_a: { fileName: 'shared', scope: 'project' },
+      graph_1: { fileName: 'valid', scope: 'user' },
+    });
   });
 
   test('respects the graph count cap', () => {
-    const graphs = Array.from({ length: 60 }, (_, index) => ({
-      ...structuredClone(validGraph),
-      id: `graph_${index}`,
+    const entries = Array.from({ length: 60 }, (_, index) => ({
+      fileName: `graph-${index}`,
+      scope: 'project' as const,
+      graph: { ...structuredClone(validGraph), id: `graph_${index}` },
     }));
-    expect(sanitizeRunGraphs(graphs)).toHaveLength(50);
+    const result = sanitizeRunGraphFileEntries(entries);
+    expect(result.graphs).toHaveLength(50);
   });
 });

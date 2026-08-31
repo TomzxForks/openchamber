@@ -13,8 +13,8 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
 import { sanitizeStarterRefs, type DraftStarterRef } from './draftStarters';
-import { sanitizeRunGraphs, sanitizeRunSessionIndex } from './runGraph/sanitize';
-import type { MultiRunSessionLink, RunGraphDefinition } from '@/types/runGraph';
+import { sanitizeRunSessionIndex } from './runGraph/sanitize';
+import type { MultiRunSessionLink } from '@/types/runGraph';
 import { createProjectIdFromPath } from './projectId';
 import { runtimeFetch } from './runtime-fetch';
 
@@ -43,7 +43,6 @@ interface OpenChamberConfig {
   projectActions?: OpenChamberProjectAction[];
   projectActionsPrimaryId?: string;
   draftStarters?: DraftStarterRef[];
-  multiRunGraphs?: RunGraphDefinition[];
   multiRunSessionIndex?: Record<string, MultiRunSessionLink>;
 }
 
@@ -537,15 +536,6 @@ export async function saveProjectActionsState(
     projectActions: sanitized.actions,
     projectActionsPrimaryId: sanitized.primaryActionId ?? undefined,
   });
-}
-
-export async function getMultiRunGraphs(project: ProjectRef): Promise<RunGraphDefinition[]> {
-  const config = await readOpenChamberConfig(project);
-  return sanitizeRunGraphs(config?.multiRunGraphs);
-}
-
-export async function saveMultiRunGraphs(project: ProjectRef, graphs: RunGraphDefinition[]): Promise<boolean> {
-  return updateOpenChamberConfig(project, { multiRunGraphs: sanitizeRunGraphs(graphs) });
 }
 
 export async function getMultiRunSessionIndex(

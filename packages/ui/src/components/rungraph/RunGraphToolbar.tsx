@@ -17,11 +17,14 @@ export const RunGraphToolbar: React.FC<RunGraphToolbarProps> = ({ onSelect, clas
   const { t } = useI18n();
   const draft = useRunGraphStore((state) => state.draft);
   const graphs = useRunGraphStore((state) => state.graphs);
+  const graphFiles = useRunGraphStore((state) => state.graphFiles);
   const selectedGraphId = useRunGraphStore((state) => state.selectedGraphId);
+  const draftScope = useRunGraphStore((state) => state.draftScope);
   const activeRun = useRunGraphStore((state) => state.activeRun);
 
   const createDraft = useRunGraphStore((state) => state.createDraft);
   const selectGraph = useRunGraphStore((state) => state.selectGraph);
+  const setDraftScope = useRunGraphStore((state) => state.setDraftScope);
   const saveDraft = useRunGraphStore((state) => state.saveDraft);
   const deleteGraph = useRunGraphStore((state) => state.deleteGraph);
   const renameDraft = useRunGraphStore((state) => state.renameDraft);
@@ -102,7 +105,7 @@ export const RunGraphToolbar: React.FC<RunGraphToolbarProps> = ({ onSelect, clas
           onSelect(null);
         }}
       >
-        <SelectTrigger className="h-8 w-44">
+        <SelectTrigger className="h-8 w-44" aria-label={t('layout.mainTab.graphs')}>
           <SelectValue placeholder={t('layout.mainTab.graphs')}>
             {graphs.find((graph) => graph.id === selectedGraphId)?.name}
           </SelectValue>
@@ -111,6 +114,9 @@ export const RunGraphToolbar: React.FC<RunGraphToolbarProps> = ({ onSelect, clas
           {graphs.map((graph) => (
             <SelectItem key={graph.id} value={graph.id}>
               {graph.name}
+              {graphFiles[graph.id]?.scope === 'user' && (
+                <span className="ml-1.5 text-xs text-muted-foreground">({t('rungraph.scope.global')})</span>
+              )}
             </SelectItem>
           ))}
         </SelectContent>
@@ -139,6 +145,18 @@ export const RunGraphToolbar: React.FC<RunGraphToolbarProps> = ({ onSelect, clas
           className="h-8 w-44"
           aria-label={t('layout.mainTab.graphs')}
         />
+      )}
+
+      {draft && (
+        <Select value={draftScope} onValueChange={(value) => setDraftScope(value === 'user' ? 'user' : 'project')} disabled={isRunning}>
+          <SelectTrigger className="h-8 w-32" aria-label={t('rungraph.scope.location')}>
+            <SelectValue>{draftScope === 'user' ? t('rungraph.scope.global') : t('rungraph.scope.project')}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="project">{t('rungraph.scope.project')}</SelectItem>
+            <SelectItem value="user">{t('rungraph.scope.global')}</SelectItem>
+          </SelectContent>
+        </Select>
       )}
 
       <div className="ml-auto flex items-center gap-2">

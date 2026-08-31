@@ -121,6 +121,21 @@ export interface RunGraphDefinition {
   updatedAt: number;
 }
 
+/**
+ * Where a graph's YAML file lives: `project` scope is
+ * `<project>/.agents/workflows/<name>.yaml`, `user` scope is
+ * `~/.agents/workflows/<name>.yaml`. The scope is directory metadata and is
+ * never serialized into the YAML file itself.
+ */
+export type RunGraphScope = 'project' | 'user';
+
+/** Location metadata for a loaded graph's backing file. */
+export interface RunGraphFileMeta {
+  /** File name stem of the backing YAML file (e.g. `my-graph`). */
+  fileName: string;
+  scope: RunGraphScope;
+}
+
 export type RunInstancePlacement =
   | { mode: 'root' }
   | { mode: 'pool'; worktreeId: string }

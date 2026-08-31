@@ -4,11 +4,11 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
 import { resolveActiveProjectRef } from '@/lib/activeProject';
 import { getLastAssistantText } from '@/lib/multirun/sessionOutput';
-import { getMultiRunGraphs, getMultiRunSessionIndex, saveMultiRunGraphs, saveMultiRunSessionIndex } from '@/lib/openchamberConfig';
+import { getMultiRunSessionIndex, saveMultiRunSessionIndex, getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
+import { deleteWorkflowFile, fetchWorkflowFiles, saveWorkflowFile } from '@/lib/runGraph/workflowsApi';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
-import { getWorktreeSetupWaitEnabled } from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { routeMessage } from '@/sync/session-ui-store';
@@ -19,8 +19,10 @@ import type {
   MultiRunSessionLink,
   RunGraphDefinition,
   RunGraphEdgeSource,
+  RunGraphFileMeta,
   RunGraphFormField,
   RunGraphNodeInput,
+  RunGraphScope,
   RunGraphWorktree,
   RunModelInstance,
 } from '@/types/runGraph';
@@ -49,6 +51,7 @@ import {
   withoutWorktree,
 } from '@/lib/runGraph/editorGraph';
 import { createRunGraphEntityId } from '@/lib/runGraph/ids';
+import { toRunGraphSlug } from '@/lib/runGraph/slug';
 import { RunGraphExecutor, type RunGraphExecutorDeps, type RunGraphRunState } from '@/lib/runGraph/executor';
 import { hasRunGraphErrors, validateRunGraph, type RunGraphValidationIssue } from '@/lib/runGraph/validate';
 
@@ -155,11 +158,14 @@ const buildExecutorDeps = (
 
 interface RunGraphState {
   graphs: RunGraphDefinition[];
+  /** Backing YAML file location per graph id (`.agents/workflows` project or user scope). */
+  graphFiles: Record<string, RunGraphFileMeta>;
   sessionIndex: Record<string, MultiRunSessionLink>;
   isLoading: boolean;
   error: string | null;
   selectedGraphId: string | null;
   draft: RunGraphDefinition | null;
+  draftScope: RunGraphScope;
   isSaving: boolean;
   activeRun: RunGraphRunState | null;
 }
@@ -169,6 +175,7 @@ interface RunGraphActions {
   recordSessionLink: (sessionId: string, link: MultiRunSessionLink) => void;
   createDraft: (name?: string) => void;
   selectGraph: (graphId: string) => void;
+  setDraftScope: (scope: RunGraphScope) => void;
   closeDraft: () => void;
   renameDraft: (name: string) => void;
   setDraftBaseBranch: (branch: string) => void;
@@ -246,11 +253,13 @@ export const useRunGraphStore = create<RunGraphStore>()(
 
       return {
         graphs: [],
+        graphFiles: {},
         sessionIndex: {},
         isLoading: false,
         error: null,
         selectedGraphId: null,
         draft: null,
+        draftScope: 'project',
         isSaving: false,
         activeRun: null,
 
@@ -262,9 +271,14 @@ export const useRunGraphStore = create<RunGraphStore>()(
           }
           set({ isLoading: true, error: null });
           try {
-            const graphs = await getMultiRunGraphs(project);
+            const files = await fetchWorkflowFiles(project.path);
             const sessionIndex = await getMultiRunSessionIndex(project);
-            set({ graphs, sessionIndex, isLoading: false });
+            set({
+              graphs: files.graphs,
+              graphFiles: files.fileMeta,
+              sessionIndex,
+              isLoading: false,
+            });
           } catch (error) {
             set({
               error: error instanceof Error ? error.message : 'Failed to load graphs',
@@ -287,17 +301,23 @@ export const useRunGraphStore = create<RunGraphStore>()(
         createDraft: (name) => {
           const now = Date.now();
           const draft = createEmptyRunGraph(name?.trim() || 'Untitled graph', now);
-          set({ draft, selectedGraphId: draft.id });
+          set({ draft, selectedGraphId: draft.id, draftScope: 'project' });
         },
 
         selectGraph: (graphId) => {
           const graph = get().graphs.find((entry) => entry.id === graphId);
           if (!graph) return;
-          set({ draft: cloneDraft(graph), selectedGraphId: graphId });
+          set({
+            draft: cloneDraft(graph),
+            selectedGraphId: graphId,
+            draftScope: get().graphFiles[graphId]?.scope ?? 'project',
+          });
         },
 
+        setDraftScope: (scope) => set({ draftScope: scope }),
+
         closeDraft: () => {
-          set({ draft: null, selectedGraphId: null });
+          set({ draft: null, selectedGraphId: null, draftScope: 'project' });
         },
 
         renameDraft: (name) => mutateDraft((draft) => ({ ...draft, name })),
@@ -346,14 +366,42 @@ export const useRunGraphStore = create<RunGraphStore>()(
           set({ isSaving: true, error: null });
           try {
             const persisted = touchRunGraph(draft, Date.now());
-            const others = get().graphs.filter((entry) => entry.id !== persisted.id);
-            const graphs = [persisted, ...others];
-            const ok = await saveMultiRunGraphs(project, graphs);
-            if (!ok) {
-              set({ error: 'Failed to save graph', isSaving: false });
-              return false;
+            const fileName = toRunGraphSlug(persisted.name) || 'untitled';
+            const scope = get().draftScope;
+            const previous = get().graphFiles[persisted.id] ?? null;
+            const scopeChanged = previous !== null && previous.scope !== scope;
+
+            // `previousName: null` makes the server refuse to overwrite an
+            // existing file, which protects brand-new graphs and scope moves
+            // alike; only same-scope saves of a loaded file may overwrite.
+            await saveWorkflowFile({
+              name: fileName,
+              scope,
+              directory: project.path,
+              graph: persisted,
+              previousName: previous && !scopeChanged ? previous.fileName : null,
+            });
+
+            // Scope moves write the new file first; the stale file in the old
+            // scope is removed afterwards and must not fail the save.
+            if (scopeChanged && previous) {
+              await deleteWorkflowFile({
+                name: previous.fileName,
+                scope: previous.scope,
+                directory: project.path,
+              }).catch((deleteError) => {
+                console.error('Failed to remove workflow file from previous scope:', deleteError);
+                set({ error: 'Graph saved, but the previous file could not be removed' });
+              });
             }
-            set({ graphs, draft: persisted, isSaving: false });
+
+            const others = get().graphs.filter((entry) => entry.id !== persisted.id);
+            set({
+              graphs: [persisted, ...others],
+              graphFiles: { ...get().graphFiles, [persisted.id]: { fileName, scope } },
+              draft: persisted,
+              isSaving: false,
+            });
             return true;
           } catch (error) {
             set({
@@ -367,14 +415,24 @@ export const useRunGraphStore = create<RunGraphStore>()(
         deleteGraph: async (graphId) => {
           const project = requireProject();
           if (!project) return;
-          const graphs = get().graphs.filter((entry) => entry.id !== graphId);
-          const ok = await saveMultiRunGraphs(project, graphs);
-          if (!ok) {
+          const meta = get().graphFiles[graphId];
+          if (!meta) {
             set({ error: 'Failed to delete graph' });
             return;
           }
+          try {
+            await deleteWorkflowFile({ name: meta.fileName, scope: meta.scope, directory: project.path });
+          } catch (error) {
+            set({
+              error: error instanceof Error ? error.message : 'Failed to delete graph',
+            });
+            return;
+          }
+          const graphFiles = { ...get().graphFiles };
+          delete graphFiles[graphId];
           set((state) => ({
-            graphs,
+            graphs: state.graphs.filter((entry) => entry.id !== graphId),
+            graphFiles,
             draft: state.draft?.id === graphId ? null : state.draft,
             selectedGraphId: state.selectedGraphId === graphId ? null : state.selectedGraphId,
           }));

@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Graphs:** a new Graphs tab builds multi-run graphs. Each run node holds a prompt template, named inputs, and up to five models; upstream outputs connect into a named input and prompts reference it as a variable (with `[N]` for individual values when several connect into the same input). Worktree nodes run agents in a shared, existing, or freshly created git worktree. Sessions created by a run stay linked to their node so you can jump back to them.
+- **Graphs:** a new Graphs tab builds multi-run graphs. Each run node holds a prompt template, named inputs, and up to five models; upstream outputs connect into a named input and prompts reference it as a variable (with `[N]` for individual values when several connect into the same input). Worktree nodes run agents in a shared, existing, or freshly created git worktree. Sessions created by a run stay linked to their node so you can jump back to them. Graphs are saved as one YAML file per graph in the project's `.agents/workflows` folder or, when you pick Global in the Graphs toolbar, your user `~/.agents/workflows` folder, the same way skills are stored; same-named project graphs win over global ones, and the files can be committed or hand-edited.
 - **Graphs:** form nodes collect your input while a graph runs. Declare any number of fields (text, paragraph, number, date, time, dropdown, slider, checkbox), connect each field into a run's inputs, and the form only appears when a run actually needs it. Outputs from earlier runs can be connected into a form to prefill its fields.
 
 ## [1.19.0] - 2026-08-19
