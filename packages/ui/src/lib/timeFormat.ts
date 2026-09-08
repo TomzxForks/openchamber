@@ -70,8 +70,14 @@ export const formatRelativeMessageTime = (timestamp: number, now: number): strin
   const minutes = Math.floor((elapsed % HOUR_MS) / MINUTE_MS);
 
   if (days > 0) {
+    if (hours === 0 && minutes === 0) {
+      return formatMessage(dictionary, 'common.relative.daysAgoCompact', { count: days });
+    }
     return formatMessage(dictionary, 'common.relative.daysHoursMinutesAgoShort', { days, hours, minutes });
   }
 
+  if (minutes === 0) {
+    return formatMessage(dictionary, 'common.relative.hoursAgoShort', { count: hours });
+  }
   return formatMessage(dictionary, 'common.relative.hoursMinutesAgoShort', { hours, minutes });
 };
