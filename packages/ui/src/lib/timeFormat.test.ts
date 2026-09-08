@@ -31,9 +31,19 @@ describe('formatRelativeMessageTime', () => {
     expect(formatRelativeMessageTime(now - 13 * HOUR - 20 * MINUTE, now)).toBe('13h 20m ago');
   });
 
+  test('drops zero-valued minutes for round hours', () => {
+    expect(formatRelativeMessageTime(now - HOUR, now)).toBe('1h ago');
+    expect(formatRelativeMessageTime(now - 2 * HOUR, now)).toBe('2h ago');
+  });
+
   test('returns "{days}d {hours}h {minutes}m ago" for elapsed >= one day', () => {
     expect(formatRelativeMessageTime(now - DAY - 2 * HOUR - 5 * MINUTE, now)).toBe('1d 2h 5m ago');
     expect(formatRelativeMessageTime(now - 3 * DAY - 4 * HOUR - 30 * MINUTE, now)).toBe('3d 4h 30m ago');
+  });
+
+  test('drops zero-valued hours and minutes for round days', () => {
+    expect(formatRelativeMessageTime(now - DAY, now)).toBe('1d ago');
+    expect(formatRelativeMessageTime(now - 2 * DAY, now)).toBe('2d ago');
   });
 
   test('treats future timestamps as "Just now"', () => {

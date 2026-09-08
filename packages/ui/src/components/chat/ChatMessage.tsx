@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
 import MessageBody from './message/MessageBody';
-import { MessageTimestamp } from './message/MessageTimestamp';
+import MessageTimestamp from './message/MessageTimestamp';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
