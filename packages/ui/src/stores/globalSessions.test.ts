@@ -1,9 +1,55 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
+import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test'
-import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
+import { createOpencodeClient } from '@opencode-ai/sdk/v2'
 
-import { listGlobalSessionPages, splitGlobalSessionsByArchived } from './globalSessions'
+import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived } from './globalSessions'
+
+describe('managed Chats runtime visibility', () => {
+  const session = (id: string, directory: string): Session => ({
+    id,
+    slug: id,
+    projectID: 'project',
+    directory,
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+  })
+  const chat = session('chat', '/home/user/.config/openchamber/chats/2026-08-21/session-a')
+  const project = session('project', '/workspace/project')
+
+  test('VS Code rejects managed Chats before they enter global state', () => {
+    expect(filterManagedChatsForRuntime([chat, project], true)).toEqual([project])
+  })
+
+  test('other runtimes retain managed Chats', () => {
+    expect(filterManagedChatsForRuntime([chat, project], false)).toEqual([chat, project])
+  })
+})
 
 describe('listGlobalSessionPages', () => {
+  test('uses the next cursor from the SDK HTTP response rather than guessing from session timestamps', async () => {
+    const cursors: Array<string | null> = []
+    const apiClient = createOpencodeClient({
+      baseUrl: 'https://sessions.test',
+      fetch: async (request) => {
+        const url = new URL(request instanceof Request ? request.url : request.toString())
+        const cursor = url.searchParams.get('cursor')
+        cursors.push(cursor)
+        return cursor === null
+          ? Response.json([
+            { id: 'first', time: { updated: 20 } },
+            { id: 'second', time: { updated: 10 } },
+          ], { headers: { 'x-next-cursor': '8' } })
+          : Response.json([{ id: 'last', time: { updated: 5 } }])
+      },
+    })
+    const sessions = await listGlobalSessionPages(apiClient, { archived: false, pageSize: 2 })
+    expect(cursors).toEqual([null, '8'])
+    expect(sessions.map((session) => session.id)).toEqual(['first', 'second', 'last'])
+  })
+
   test('sanitizes session list records before returning them', async () => {
     const apiClient = {
       experimental: {
@@ -313,3 +359,8 @@ describe('splitGlobalSessionsByArchived', () => {
     expect(archived.map((session) => session.id)).toEqual(['ses_archived'])
   })
 })
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home/user' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

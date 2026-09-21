@@ -1,81 +1,51 @@
-/**
- * Regression tests for https://github.com/openchamber/openchamber/issues/2999
- *
- * The settings sections (Agents, Commands, MCP, Providers, Skills) each embed
- * a per-project selector built from SettingsProjectSelector. That selector
- * rendered a DropdownMenu whose content had no height cap and no scroll
- * container, so on mobile a long project list opened past the bottom of the
- * screen and projects below the fold were unreachable.
- *
- * The fix reuses the main-view selector approach: shared Select primitives
- * whose SelectContent caps the popup to the available viewport height
- * (max-h-[var(--available-height)] + ScrollableOverlay) and scrolls
- * internally, with project icon/color parity via the main-view ProjectLabel.
- *
- * The base-ui Select popup only renders when open, so popup-related behavior
- * is asserted as source contracts (the repo's established pattern for
- * portaled UI, cf. terminalViewportRemount.test.ts) while ordering is
- * verified through the exported pure helper.
- */
-import { describe, expect, mock, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
+import React, { act } from 'react';
+import { Window } from 'happy-dom';
+import { expect, test } from 'bun:test';
+import { createRoot } from 'react-dom/client';
+import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
+import { I18nProvider } from '@/lib/i18n';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { SettingsProjectSelector } from './SettingsProjectSelector';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const selectorSource = readFileSync(join(__dirname, 'SettingsProjectSelector.tsx'), 'utf-8');
-
-mock.module('@/lib/desktop', () => ({
-  isVSCodeRuntime: () => false,
-}));
-
-const { themes } = await import('@/lib/theme/themes');
-
-mock.module('@/contexts/useThemeSystem', () => ({
-  useThemeSystem: () => ({ currentTheme: themes[0] }),
-}));
-
-const { SettingsProjectSelector, sortSettingsProjects } = await import('./SettingsProjectSelector');
-const { I18nProvider } = await import('@/lib/i18n');
-const { renderToStaticMarkup } = await import('react-dom/server');
-
-describe('SettingsProjectSelector (#2999)', () => {
-  test('desktop renders through Select primitives so the popup is viewport-capped and internally scrolling', () => {
-    expect(selectorSource).toContain("from '@/components/ui/select'");
-    expect(selectorSource).toContain('<SelectContent');
-    expect(selectorSource).not.toContain("from '@/components/ui/dropdown-menu'");
-    expect(selectorSource).not.toContain('<DropdownMenu');
-  });
-
-  test('mobile reuses the composer bottom-sheet project picker instead of a popup', () => {
-    expect(selectorSource).toContain('ProjectPickerSheet');
-    expect(selectorSource).toContain('state.isMobile');
-  });
-
-  test('renders project icon and color metadata for parity with the main-view selector', () => {
-    expect(selectorSource).toContain("from '@/components/chat/composer/ui/DraftTargetSelectors'");
-    expect(selectorSource).toContain('<ProjectLabel');
-  });
-
-  test('keeps hiding itself on the VS Code runtime', () => {
-    expect(selectorSource).toContain('isVSCodeRuntime');
-    expect(selectorSource).toContain('if (isVSCode || !activeProject)');
-  });
-
-  test('sorts projects alphabetically by display label', () => {
-    const sorted = sortSettingsProjects([
-      { id: 'zeta', path: '/home/dev/zeta', label: 'Zeta' },
-      { id: 'alpha', path: '/home/dev/alpha' },
-      { id: 'beta', path: '/home/dev/beta', label: 'beta' },
-    ]);
-    expect(sorted.map((project) => project.id)).toEqual(['alpha', 'beta', 'zeta']);
-  });
-
-  test('renders nothing without projects', () => {
-    useProjectsStore.setState({ projects: [], activeProjectId: null });
-    const html = renderToStaticMarkup(<I18nProvider><SettingsProjectSelector /></I18nProvider>);
-    expect(html).toBe('');
-  });
+test('mobile picker reaches every project and changes only the Settings directory', async () => {
+  const win = new Window({ url: 'http://localhost' });
+  const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true };
+  const previous = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const [key, value] of Object.entries(values)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  const projects = Array.from({ length: 55 }, (_, index) => ({ id: `project-${index}`, path: `/projects/${index}`, label: `Project ${String(index).padStart(2, '0')}` }));
+  const initialProjects = useProjectsStore.getState();
+  const initialUI = useUIStore.getState();
+  useProjectsStore.setState({ projects: [...projects].reverse(), activeProjectId: projects[0].id });
+  useUIStore.setState({ isMobile: true, settingsProjectPath: null });
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ThemeSystemProvider><I18nProvider><SettingsProjectSelector /></I18nProvider></ThemeSystemProvider>));
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Switch project"]');
+    expect(trigger).not.toBeNull();
+    await act(async () => trigger?.click());
+    const dialog = document.querySelector('[role="dialog"]');
+    const rows = Array.from(dialog?.querySelectorAll<HTMLButtonElement>('button') ?? []).filter((row) => row.textContent?.startsWith('Project '));
+    expect(rows).toHaveLength(55);
+    expect(rows[0].textContent).toBe('Project 00');
+    expect(rows[54].textContent).toBe('Project 54');
+    await act(async () => rows[54].click());
+    expect(useUIStore.getState().settingsProjectPath).toBe('/projects/54');
+    expect(useProjectsStore.getState().activeProjectId).toBe('project-0');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(trigger?.textContent).toBe('Project 54');
+    await act(async () => useProjectsStore.setState({ projects: [] }));
+    expect(container.textContent).toBe('');
+  } finally {
+    await act(async () => root.unmount());
+    useProjectsStore.setState(initialProjects);
+    useUIStore.setState(initialUI);
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+    await win.happyDOM.close();
+  }
 });

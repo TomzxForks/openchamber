@@ -4,14 +4,21 @@ import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
 import { registerSessionGoalRoutes } from '../session-goal/routes.js';
 import { registerGitHubRoutes } from '../github/routes.js';
+import { registerLinearRoutes } from '../linear/routes.js';
+import { registerGuestRoutes } from '../guests/routes.js';
+import { registerBuiltInGuests } from '../guests/catalog.js';
+import { extensionsPersistPath } from '../guests/persist.js';
 import { registerGitRoutes } from '../git/routes.js';
 import { registerDevServerRoutes } from '../dev-servers/routes.js';
 import { registerMagicPromptRoutes } from '../magic-prompts/routes.js';
 import { registerSessionFoldersRoutes } from '../session-folders/routes.js';
 import { registerProjectContextRoutes } from '../project-context/routes.js';
+import { registerProjectSetupRoutes } from '../projects/routes.js';
 import { registerAgentMemoryRoutes } from '../agent-memory/routes.js';
 import { registerSessionKnowledgeRoutes } from '../session-knowledge/routes.js';
 import { registerPermissionAutoAcceptRoutes } from '../permission-auto-accept/runtime.js';
+import { registerMessageQueueRoutes } from '../message-queue/runtime.js';
+import { registerRoutingPromptRewrite, registerRoutingRoutes } from '../routing/routes.js';
 import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
@@ -45,12 +52,11 @@ import {
 import { SKILL_DIR, SKILL_SCOPE, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile } from './shared.js';
 import { getSkillSources, discoverSkills, mergeDiscoveredSkills, createSkill, updateSkill, deleteSkill, renameSkill, isManagedSkillPath } from './skills.js';
 import { getCuratedSkillsSources } from '../skills-catalog/curated-sources.js';
-import { getCacheKey, getCachedScan, setCachedScan } from '../skills-catalog/cache.js';
-import { isClawdHubSource, parseSkillRepoSource } from '../skills-catalog/source.js';
+import { getCacheKey, scanWithCache } from '../skills-catalog/cache.js';
+import { parseSkillRepoSource } from '../skills-catalog/source.js';
 import { scanSkillsRepository } from '../skills-catalog/scan.js';
 import { installSkillsFromRepository } from '../skills-catalog/install.js';
-import { scanClawdHubPage } from '../skills-catalog/clawdhub/scan.js';
-import { installSkillsFromClawdHub } from '../skills-catalog/clawdhub/install.js';
+import { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
 
 export const createFeatureRoutesRuntime = (dependencies) => {
   const {
@@ -96,12 +102,16 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
+      onGuestDeactivated,
       openchamberUserConfigRoot,
+      managedChatsRoot,
       normalizeDirectoryPath,
       resolveProjectDirectory,
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       getOpenCodeResolutionSnapshot,
       getOpenCodeUpgradeCapability,
@@ -132,15 +142,24 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       writeSseEvent,
       emitSessionCreatedEvent,
       permissionAutoAcceptRuntime,
+      messageQueueRuntime,
+      routingRuntime,
+      openchamberVersion,
     } = routeDependencies;
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       clientReloadDelayMs,
     });
 
     registerPermissionAutoAcceptRoutes(app, permissionAutoAcceptRuntime);
+    registerMessageQueueRoutes(app, messageQueueRuntime);
+    registerRoutingRoutes(app, routingRuntime);
+    // Before the generic OpenCode proxy: turns `openchamber/auto` into a real model.
+    registerRoutingPromptRewrite(app, routingRuntime);
 
     registerOpenCodeRoutes(app, {
       crypto,
@@ -287,14 +306,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       SKILL_DIR,
       getCuratedSkillsSources,
       getCacheKey,
-      getCachedScan,
-      setCachedScan,
+      scanWithCache,
       parseSkillRepoSource,
       scanSkillsRepository,
       installSkillsFromRepository,
-      scanClawdHubPage,
-      installSkillsFromClawdHub,
-      isClawdHubSource,
+      fetchGitHubRepoMetas,
       getProfiles,
       getProfile,
     });
@@ -304,7 +320,24 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerWalkthroughRoutes(app, { getWalkthroughService });
     registerSessionGoalRoutes(app);
     registerGitHubRoutes(app);
-    registerGitRoutes(app);
+    registerLinearRoutes(app);
+    await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: routeDependencies.builtInExtensionsDir });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated });
+    registerGitRoutes(app, {
+      emitWorktreeChanged: ({ directories, at }) => {
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, {
+              type: 'openchamber:worktree-changed',
+              properties: { directories, at },
+            });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      },
+    });
     registerDevServerRoutes(app, { scanner: devServerScanner, getOwnPorts });
     registerMagicPromptRoutes(app, {
       fsPromises,
@@ -312,6 +345,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberDataDir,
     });
     registerProjectContextRoutes(app, { projectContextRuntime });
+    registerProjectSetupRoutes(app, { projectConfigRuntime });
     registerAgentMemoryRoutes(app, { agentMemoryRuntime, isAgentMemoryEnabled });
     registerSessionKnowledgeRoutes(app, { sessionKnowledgeRuntime });
 
@@ -331,6 +365,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       buildAugmentedPath,
       resolveGitBinaryForSpawn,
       openchamberUserConfigRoot,
+      managedChatsRoot,
     });
   };
 

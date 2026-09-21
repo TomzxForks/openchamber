@@ -7,6 +7,7 @@ import {
   reconcileSessionActivitySnapshot,
   removeSessionOrdering,
   resetSessionOrdering,
+  promoteRestoredSessionOrdering,
   useSessionOrderingStore,
   raiseSessionOrderingBaselines,
 } from './session-ordering';
@@ -30,7 +31,7 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'active');
     const activeRank = useSessionOrderingStore.getState().rankById.get('session-a');
-    expect(typeof activeRank).toBe('number');
+    expect(activeRank ?? 0).toBeGreaterThan(0);
 
     observeSessionActivityEvent('session-a', 'active');
     expect(useSessionOrderingStore.getState().rankById.get('session-a')).toBe(activeRank);
@@ -96,6 +97,27 @@ describe('session lifecycle ordering', () => {
     expect(useSessionOrderingStore.getState().rankById.has('session-a')).toBe(false);
   });
 
+  test('promotes a restored session without synthesizing lifecycle activity', () => {
+    const restored = session('restored', 10);
+
+    promoteRestoredSessionOrdering(restored.id);
+    const restoredRank = useSessionOrderingStore.getState().rankById.get(restored.id);
+
+    expect(restored.time.updated).toBe(10);
+    expect(restoredRank).toBeGreaterThan(10);
+
+    observeSessionActivityEvent(restored.id, 'settled');
+    expect(useSessionOrderingStore.getState().rankById.get(restored.id)).toBe(restoredRank);
+  });
+
+  test('clears restored ordering promotion on runtime ordering reset', () => {
+    promoteRestoredSessionOrdering('restored');
+
+    resetSessionOrdering();
+
+    expect(useSessionOrderingStore.getState().rankById.has('restored')).toBe(false);
+  });
+
   test('sorts each forest scope before flattening parent-first', () => {
     const rootOlder = session('root-older', 10);
     const rootNewer = session('root-newer', 20);
@@ -116,6 +138,32 @@ describe('session lifecycle ordering', () => {
       'child-older',
       'child-newer',
       'root-newer',
+    ]);
+  });
+
+  test('orders roots, siblings, orphan parents, and cyclic parent scopes deterministically', () => {
+    const rootOlder = session('root-older', 10);
+    const rootNewer = session('root-newer', 20);
+    const childOlder = session('child-older', 5, 'root-older');
+    const childNewer = session('child-newer', 6, 'root-older');
+    const orphanOlder = session('orphan-older', 10, 'missing-parent');
+    const orphanNewer = session('orphan-newer', 20, 'missing-parent');
+    const cycleOlder = session('cycle-older', 10, 'cycle-newer');
+    const cycleNewer = session('cycle-newer', 20, 'cycle-older');
+
+    expect(orderSessionsByLifecycleScopes(
+      [cycleOlder, rootOlder, childOlder, orphanOlder, cycleNewer, rootNewer, childNewer, orphanNewer],
+      new Set(),
+      new Map(),
+    ).map((item) => item.id)).toEqual([
+      'orphan-newer',
+      'root-newer',
+      'orphan-older',
+      'root-older',
+      'child-newer',
+      'child-older',
+      'cycle-newer',
+      'cycle-older',
     ]);
   });
 

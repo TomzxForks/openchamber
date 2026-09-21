@@ -9,6 +9,8 @@ import {
 import { ProjectLabel, ProjectPickerSheet } from '@/components/chat/composer/ui/DraftTargetSelectors';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
+import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { Icon } from '@/components/icon/Icon';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -17,7 +19,7 @@ import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 
 /** Settings sections list projects alphabetically, unlike the sidebar's manual order. */
-export const sortSettingsProjects = (projects: ProjectEntry[]): ProjectEntry[] => {
+const sortSettingsProjects = (projects: ProjectEntry[]): ProjectEntry[] => {
   return [...projects].sort((a, b) => (a.label || a.path).localeCompare(b.label || b.path));
 };
 
@@ -27,23 +29,27 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
   const isMobile = useUIStore((state) => state.isMobile);
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const projects = useProjectsStore((state) => state.projects);
-  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  // Settings-only selection. Picking a project here used to call
+  // `setActiveProject`, which relocates the chat, the session list and the file
+  // tree; reading another project's configuration must not move the app.
+  const settingsDirectory = useSettingsDirectory();
+  const setSettingsProjectPath = useUIStore((state) => state.setSettingsProjectPath);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   const sortedProjects = React.useMemo(() => sortSettingsProjects(projects), [projects]);
 
   const activeProject = React.useMemo(() => {
-    return sortedProjects.find((p) => p.id === activeProjectId) ?? sortedProjects[0] ?? null;
-  }, [activeProjectId, sortedProjects]);
+    return sortedProjects.find((p) => p.path === settingsDirectory) ?? sortedProjects[0] ?? null;
+  }, [settingsDirectory, sortedProjects]);
 
   if (isVSCode || !activeProject) {
     return null;
   }
 
   const handleSelect = (projectId: string) => {
-    setActiveProject(projectId);
+    const project = sortedProjects.find((entry) => entry.id === projectId);
+    if (project) setSettingsProjectPath(project.path);
   };
 
   // Mobile reuses the composer's bottom-sheet project picker: a select popup
@@ -56,14 +62,16 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
             type="button"
             aria-label={t('settings.shared.projectSelector.switchProjectAria')}
             title={t('settings.shared.projectSelector.switchProjectTitle')}
+            aria-haspopup="dialog"
+            aria-expanded={sheetOpen}
             onClick={() => setSheetOpen(true)}
             className={cn(
-              'flex h-8 w-full min-w-0 items-center gap-1.5 rounded-lg border border-border/80 bg-transparent px-3 text-left',
-              'hover:border-input hover:bg-interactive-hover focus-visible:outline-none focus-visible:border-primary/70 focus-visible:ring-1 focus-visible:ring-primary/50',
+              dropdownTriggerVariants({ size: 'touch' }),
+              'w-full min-w-0',
             )}
           >
             <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">
-              {<ProjectLabel project={activeProject} theme={currentTheme} />}
+              <ProjectLabel project={activeProject} theme={currentTheme} />
             </span>
             <Icon name="arrow-down-s" className="size-4 opacity-50" />
           </button>
@@ -98,13 +106,13 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
           title={t('settings.shared.projectSelector.switchProjectTitle')}
         >
           <SelectValue>
-            {<ProjectLabel project={activeProject} theme={currentTheme} />}
+            <ProjectLabel project={activeProject} theme={currentTheme} />
           </SelectValue>
         </SelectTrigger>
         <SelectContent fitContent>
           {sortedProjects.map((project) => (
             <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
-              {<ProjectLabel project={project} theme={currentTheme} />}
+              <ProjectLabel project={project} theme={currentTheme} />
             </SelectItem>
           ))}
         </SelectContent>

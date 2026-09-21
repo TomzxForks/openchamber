@@ -1,3 +1,4 @@
+import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -7,9 +8,15 @@ import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSelectionStore } from './selection-store';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { createContextPart } from '@/lib/messages/contextParts';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -199,6 +206,47 @@ describe('session-worktree-store worktree routing', () => {
   });
 });
 
+describe('draft materialization transition identity', () => {
+  beforeEach(() => {
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      materializedDraftSessionId: null,
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+  });
+
+  test('marks and consumes only the submitted draft session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('another-session');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBe('session-created');
+
+    useSessionUIStore.getState().clearMaterializedDraftSession('session-created');
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+
+  test('clears the marker when navigating from a draft to an existing session', () => {
+    useSessionUIStore.getState().setCurrentSession(
+      'session-created',
+      '/projects/alpha',
+      'submitted-draft',
+    );
+    useSessionUIStore.setState({
+      newSessionDraft: { open: true, target: 'project', directoryOverride: '/projects/alpha' },
+    });
+    useSessionUIStore.getState().setCurrentSession('session-existing', '/projects/alpha');
+
+    expect(useSessionUIStore.getState().materializedDraftSessionId).toBeNull();
+  });
+});
+
 describe('routeMessage directory scoping', () => {
   test('runs sends in the provided session directory', async () => {
     // The session directory travels as an explicit request param (not via
@@ -356,7 +404,10 @@ describe('openNewSessionDraft project binding', () => {
   const projectA = { id: 'proj-a', path: '/projects/alpha', label: 'Alpha' };
   const projectB = { id: 'proj-b', path: '/projects/beta', label: 'Beta' };
 
+  const DRAFT_TARGET_KEY = 'oc.chatInput.lastDraftTarget';
+
   beforeEach(() => {
+    getDeferredSafeStorage().removeItem(DRAFT_TARGET_KEY);
     useSessionUIStore.setState({
       currentSessionId: null,
       currentSessionDirectory: null,
@@ -370,16 +421,69 @@ describe('openNewSessionDraft project binding', () => {
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
   });
 
-  test('keeps implicit draft on current directory when active project differs', () => {
+  afterEach(() => {
+    getDeferredSafeStorage().removeItem(DRAFT_TARGET_KEY);
+  });
+
+  test('defaults an implicit draft to Chat when active project differs', () => {
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.selectedProjectId).toBe(projectB.id);
-    expect(draft.directoryOverride).toBe(projectB.path);
+    expect(draft.target).toBe('chat');
+    expect(draft.selectedProjectId).toBeNull();
+    expect(draft.directoryOverride).toBeNull();
   });
 
-  test('does not attach active project when current directory is unmatched', () => {
+  test('paints a project default before discovery and does not undo a later manual choice', async () => {
+    const original = useConfigStore.getState();
+    let finishActivation;
+    const activation = new Promise((resolve) => { finishActivation = resolve; });
+    useConfigStore.setState({
+      activateDirectory: () => activation,
+      providers: [], agents: [], settingsDefaultsLoaded: false,
+      settingsDefaultModel: 'global/model', isConnected: false,
+    });
+    useProjectsStore.setState({ projects: [{ ...projectA, defaultModel: 'project/model', defaultVariant: 'high' }, projectB] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('project');
+      expect(useConfigStore.getState().currentModelId).toBe('model');
+      expect(useConfigStore.getState().currentVariant).toBe('high');
+      useConfigStore.setState({ currentProviderId: 'manual', currentModelId: 'chosen', selectionSource: 'manual' });
+      finishActivation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().currentProviderId).toBe('manual');
+      expect(useConfigStore.getState().currentModelId).toBe('chosen');
+    } finally {
+      finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
+  test('an old draft activation cannot replace a newer draft default', async () => {
+    const original = useConfigStore.getState();
+    let finishActivation;
+    const activation = new Promise((resolve) => { finishActivation = resolve; });
+    useConfigStore.setState({ activateDirectory: () => activation, providers: [], agents: [], isConnected: false });
+    useProjectsStore.setState({ projects: [
+      { ...projectA, defaultModel: 'alpha/model' },
+      { ...projectB, defaultModel: 'beta/model' },
+    ] });
+    try {
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+      useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+      expect(useConfigStore.getState().currentProviderId).toBe('beta');
+      finishActivation();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useConfigStore.getState().currentProviderId).toBe('beta');
+    } finally {
+      finishActivation();
+      useConfigStore.setState(original);
+    }
+  });
+
+  test('defaults an implicit draft to Chat when current directory is unmatched', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 
     useSessionUIStore.getState().openNewSessionDraft();
@@ -387,7 +491,8 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBe('/external/worktree');
+    expect(draft.target).toBe('chat');
+    expect(draft.directoryOverride).toBeNull();
   });
 
   test('respects explicit directoryOverride over active project', () => {
@@ -404,6 +509,82 @@ describe('openNewSessionDraft project binding', () => {
 
     expect(draft.open).toBe(true);
     expect(draft.selectedProjectId).toBe(projectB.id);
+  });
+
+  test('reopens an implicit draft on the project the target selector was last set to', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    useSessionUIStore.getState().closeNewSessionDraft();
+    // A chat session leaves its managed scratch directory current; the project
+    // to reopen on can only come from the recorded target.
+    useDirectoryStore.getState().setDirectory(
+      '/Users/tester/.config/openchamber/chats/ses_chat',
+      { showOverlay: false },
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
+
+  test('setNewSessionDraftTarget records Chat, so the next implicit draft opens on Chat', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID });
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('keeps the Chat default for a record written before the target was stored', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: projectB.id, directory: projectB.path }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('a chat scratch directory forwarded as override opens a chat draft', () => {
+    // "New session in the current directory" callers forward the current
+    // session's directory even when that session is a chat; its scratch
+    // directory names no project.
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: '/Users/tester/.config/openchamber/chats/ses_chat',
+    });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('chat');
+    expect(draft.directoryOverride).toBeNull();
+  });
+
+  test('a chat scratch override opens Chat even when the recorded target is a project', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: projectB.id, directory: projectB.path, target: 'project' }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: '/Users/tester/.config/openchamber/chats/ses_chat',
+    });
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+  });
+
+  test('falls back to Chat when the last project target no longer exists', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: 'proj-removed', directory: '/projects/removed', target: 'project' }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
   });
 });
 
@@ -464,7 +645,7 @@ describe('createSession draft lifecycle', () => {
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
 
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     await Bun.sleep(0);
 
     expect(useSessionUIStore.getState().newSessionDraft.directoryOverride).toBe('/projects/main');
@@ -482,7 +663,7 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-active',
     });
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
     opencodeClient.createSession = async (_params, directory) => {
       createSessionCalls.push(directory);
@@ -542,7 +723,7 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-main',
     });
     useDirectoryStore.getState().setDirectory('/private/unavailable-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/unavailable-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'unknown';
     opencodeClient.createSession = async (_params, directory) => {
       createSessionCalls.push(directory);
@@ -571,7 +752,7 @@ describe('createSession draft lifecycle', () => {
       return { id: 'session-race', directory };
     };
 
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     const createPromise = useSessionUIStore.getState().createSession('Draft title', '/private/deleted-worktree');
     expect(availabilityResolvers.length).toBe(2);
 
@@ -654,9 +835,19 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
       currentSessionDirectory: null,
       newSessionDraft: { open: false, directoryOverride: null, parentID: null },
     });
+    useProjectsStore.setState({ projects: [], activeProjectId: null });
+    useSessionDisplayStore.setState({ singleProjectId: null });
   });
 
   test('draft send snapshots the draft; switching to another project mid-flight still targets the materialized session', async () => {
+    useProjectsStore.setState({
+      projects: [
+        { id: 'project-alpha', path: '/projects/alpha', label: 'Alpha' },
+        { id: 'project-beta', path: '/projects/beta', label: 'Beta' },
+      ],
+      activeProjectId: 'project-alpha',
+    });
+    useSessionDisplayStore.setState({ singleProjectId: 'project-alpha' });
     const draftSnapshot = {
       open: true,
       directoryOverride: '/projects/alpha',
@@ -684,6 +875,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
 
     // A sidebar switch while the send is still in flight must not reroute it.
     useSessionUIStore.getState().setCurrentSession('session-project-b', '/projects/beta');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-beta');
 
     await sendPromise;
 
@@ -692,6 +884,7 @@ describe('sendMessage draft snapshot (issues #2222 / #2315)', () => {
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].id).toBe('session-materialized');
     expect(sendMessageCalls[0].directory).toBe('/projects/alpha');
+    expect(useSessionDisplayStore.getState().singleProjectId).toBe('project-alpha');
   });
 
   test('existing-session send keeps the submit-time target even when selection changes', async () => {
@@ -730,12 +923,18 @@ describe('routeMessage skill invocation', () => {
   // content is injected — not sent as a plain "/name" text message (issue #1605).
   const sendCommandCalls = [];
   const sendMessageCalls = [];
+  const liveLookupCalls = [];
+  // Live, directory-scoped command discovery. Tests replace it per case.
+  let liveLookup = async () => [];
   let originalSendCommand;
   let originalSendMessage;
+  let originalListCommands;
 
   beforeEach(() => {
     sendCommandCalls.length = 0;
     sendMessageCalls.length = 0;
+    liveLookupCalls.length = 0;
+    liveLookup = async () => [];
 
     // Minimal optimistic + connection machinery so routeMessage can dispatch.
     const childStore = {
@@ -756,13 +955,18 @@ describe('routeMessage skill invocation', () => {
     setOptimisticRefs(() => {}, () => {});
     useConfigStore.setState({ isConnected: true });
 
-    // The sync command list and the commands store both exclude user skills,
-    // so they start empty here — the skill is only known to the skills store.
-    useCommandsStore.setState({ commands: [] });
-    useSkillsStore.setState({ skills: [] });
+    // Commands and skills are resolved per directory. The commands store
+    // excludes user skills, so a skill is only known to the skills store.
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
+    useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
 
     originalSendCommand = opencodeClient.sendCommand;
     originalSendMessage = opencodeClient.sendMessage;
+    originalListCommands = opencodeClient.listCommandsWithDetails;
+    opencodeClient.listCommandsWithDetails = async (directory) => {
+      liveLookupCalls.push(directory);
+      return liveLookup(directory);
+    };
     opencodeClient.sendCommand = async (params) => {
       sendCommandCalls.push(params);
       return 'msg';
@@ -776,12 +980,14 @@ describe('routeMessage skill invocation', () => {
   afterEach(() => {
     opencodeClient.sendCommand = originalSendCommand;
     opencodeClient.sendMessage = originalSendMessage;
-    useSkillsStore.setState({ skills: [] });
+    opencodeClient.listCommandsWithDetails = originalListCommands;
+    useSkillsStore.setState({ skills: [], skillsByDirectory: {} });
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
   });
 
   test('invokes a user-installed skill as a command', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
 
     await routeMessage({
@@ -799,7 +1005,7 @@ describe('routeMessage skill invocation', () => {
 
   test('forwards trailing arguments to the skill command', async () => {
     useSkillsStore.setState({
-      skills: [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }],
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
     });
 
     await routeMessage({
@@ -815,7 +1021,136 @@ describe('routeMessage skill invocation', () => {
     expect(sendCommandCalls[0].arguments).toBe('focus on auth');
   });
 
-  test('sends an unknown slash token as a plain message', async () => {
+  test('preserves context parts and skill invocation on the prompt route', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
+    });
+    const additionalParts = [createContextPart({
+      kind: 'code-comment',
+      source: 'file',
+      fileLabel: 'src/auth.ts',
+      startLine: 4,
+      endLine: 4,
+      language: 'ts',
+      code: 'auth();',
+      text: 'check this',
+    })];
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts,
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].additionalParts[0]).toEqual(additionalParts[0]);
+    expect(sendMessageCalls[0].additionalParts[1]).toMatchObject({ synthetic: true });
+    expect(sendMessageCalls[0].additionalParts[1].text).toContain('grill-with-docs skill');
+  });
+
+  test('expands a contextual command template on the prompt route', async () => {
+    useCommandsStore.setState({
+      commandsByDirectory: { '/skills/project': [{ name: 'inspect', template: 'Inspect $ARGUMENTS carefully.' }] },
+    });
+
+    await routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [createContextPart({
+        kind: 'code-comment',
+        source: 'file',
+        fileLabel: 'src/auth.ts',
+        startLine: 4,
+        endLine: 4,
+        language: 'ts',
+        code: 'auth();',
+        text: 'check this',
+      })],
+    });
+
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('Inspect auth flow carefully.');
+    expect(sendMessageCalls[0].additionalParts[0].metadata.openchamberContext.kind).toBe('code-comment');
+  });
+
+  test('keeps session.command when the only extra part is pinned knowledge', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
+    });
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+    });
+
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('grill-with-docs');
+    expect(sendCommandCalls[0].arguments).toBe('focus on auth');
+    expect(sendMessageCalls).toHaveLength(0);
+    expect(route).toBe('command');
+  });
+
+  test('keeps primary file attachments on the command route', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
+    });
+    const files = [{
+      type: 'file',
+      mime: 'text/plain',
+      url: 'file:///projects/alpha/auth.txt',
+      filename: 'auth.txt',
+    }];
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      files,
+      additionalParts: [{ text: 'Pinned project knowledge', synthetic: true, systemContext: 'session-knowledge' }],
+    });
+
+    expect(route).toBe('command');
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].files).toEqual(files);
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('keeps unmarked synthetic instructions on the prompt route', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/skills/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'user', source: 'opencode' }] },
+    });
+    const instructions = [{ text: 'Resolve the prepared conflict first.', synthetic: true }];
+
+    const route = await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs focus on auth',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: instructions,
+    });
+
+    expect(route).toBe('prompt');
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].additionalParts[0]).toEqual(instructions[0]);
+  });
+
+  test('sends an unknown slash token as a plain message after live discovery finds nothing', async () => {
     await routeMessage({
       sessionId: 'session-skill',
       directory: '/skills/project',
@@ -824,8 +1159,176 @@ describe('routeMessage skill invocation', () => {
       modelID: 'model-a',
     });
 
+    expect(liveLookupCalls).toEqual(['/skills/project']);
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendCommandCalls).toHaveLength(0);
+  });
+
+  test('expands the template of the session directory, not a same-named root command', async () => {
+    // A root project and its worktree can define the same command with
+    // different templates. The contextual prompt must use the worktree's.
+    useCommandsStore.setState({
+      commandsByDirectory: {
+        '/repo': [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+        '/repo/worktree': [{ name: 'inspect', template: 'Worktree inspects $ARGUMENTS.' }],
+      },
+    });
+
+    await routeMessage({
+      sessionId: 'session-worktree',
+      directory: '/repo/worktree',
+      content: '/inspect auth flow',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+      additionalParts: [{ text: 'Resolve the prepared conflict first.', synthetic: true }],
+    });
+
+    expect(liveLookupCalls).toEqual([]);
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+    expect(sendMessageCalls[0].text).toBe('Worktree inspects auth flow.');
+  });
+
+  test('does not match a skill or command cached for a different directory', async () => {
+    useSkillsStore.setState({
+      skillsByDirectory: { '/other/project': [{ name: 'grill-with-docs', path: '/skills/grill-with-docs/SKILL.md', scope: 'project', source: 'opencode' }] },
+    });
+    useCommandsStore.setState({
+      commandsByDirectory: { '/other/project': [{ name: 'grill-with-docs', template: 'Other $ARGUMENTS' }] },
+    });
+
+    await routeMessage({
+      sessionId: 'session-skill',
+      directory: '/skills/project',
+      content: '/grill-with-docs',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(liveLookupCalls).toEqual(['/skills/project']);
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(1);
+  });
+
+  test('dispatches a command that only live discovery knows', async () => {
+    liveLookup = async (directory) => directory === '/skills/project'
+      ? [{ name: 'deploy', template: 'Deploy $ARGUMENTS' }]
+      : [];
+
+    const route = await routeMessage({
+      sessionId: 'session-command',
+      directory: '/skills/project',
+      content: '/deploy staging',
+      providerID: 'provider-a',
+      modelID: 'model-a',
+    });
+
+    expect(route).toBe('command');
+    expect(liveLookupCalls).toEqual(['/skills/project']);
+    expect(sendCommandCalls).toHaveLength(1);
+    expect(sendCommandCalls[0].command).toBe('deploy');
+    expect(sendCommandCalls[0].arguments).toBe('staging');
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+
+  test('fails the send instead of sending raw slash text when live discovery is rejected', async () => {
+    liveLookup = async () => { throw new Error('command list unavailable'); };
+
+    let error = null;
+    try {
+      await routeMessage({
+        sessionId: 'session-command',
+        directory: '/skills/project',
+        content: '/deploy staging',
+        providerID: 'provider-a',
+        modelID: 'model-a',
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('command list unavailable');
+    expect(sendCommandCalls).toHaveLength(0);
+    expect(sendMessageCalls).toHaveLength(0);
+  });
+});
+
+describe('goal objective directory scoping', () => {
+  let originalSendMessage;
+  let originalGetSession;
+  let originalUpdateSession;
+  let originalFetch;
+  const metadataWrites = [];
+
+  beforeEach(() => {
+    metadataWrites.length = 0;
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/repo');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({ isConnected: true });
+    useSessionUIStore.setState({
+      currentSessionId: 'session-worktree',
+      currentSessionDirectory: '/repo/worktree',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+    useCommandsStore.setState({
+      commands: [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+      commandsByDirectory: {
+        '/repo': [{ name: 'inspect', template: 'Root inspects $ARGUMENTS.' }],
+        '/repo/worktree': [{ name: 'inspect', template: 'Worktree inspects $ARGUMENTS.' }],
+      },
+    });
+    useSessionGoalArmStore.getState().setArmed(true, null);
+
+    originalSendMessage = opencodeClient.sendMessage;
+    originalGetSession = opencodeClient.getSession;
+    originalUpdateSession = opencodeClient.updateSession;
+    originalFetch = globalThis.fetch;
+    opencodeClient.sendMessage = async () => 'msg';
+    opencodeClient.getSession = async () => ({ id: 'session-worktree', metadata: {} });
+    opencodeClient.updateSession = async (sessionId, patch, directory) => {
+      metadataWrites.push({ sessionId, patch, directory });
+      return { id: sessionId, ...patch };
+    };
+    // The file-backed objective write fails here, so the objective stays inline.
+    globalThis.fetch = async () => new Response('', { status: 500 });
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    opencodeClient.getSession = originalGetSession;
+    opencodeClient.updateSession = originalUpdateSession;
+    globalThis.fetch = originalFetch;
+    useSessionGoalArmStore.getState().setArmed(false, null);
+    useCommandsStore.setState({ commands: [], commandsByDirectory: {} });
+  });
+
+  test('a slash-command goal objective expands with the target directory template', async () => {
+    await useSessionUIStore.getState().sendMessage(
+      '/inspect auth flow',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-worktree', directory: '/repo/worktree' } },
+    );
+
+    expect(metadataWrites).toHaveLength(1);
+    expect(metadataWrites[0].directory).toBe('/repo/worktree');
+    expect(metadataWrites[0].patch.metadata.openchamber.goal.objective).toBe('Worktree inspects auth flow.');
   });
 });
 
@@ -904,5 +1407,201 @@ describe('deleteSessions option forwarding', () => {
 
     expect(deleted).toBe(false);
     expect(deleteSessionCalls).toEqual([]);
+  });
+});
+
+describe('sendMessage effort record', () => {
+  let originalSendMessage;
+
+  const SESSION = 'session-effort';
+  const PROVIDER = 'provider-a';
+  const MODEL = 'model-a';
+  const AGENT = 'build';
+
+  const readRecord = () => useSelectionStore
+    .getState()
+    .getAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL);
+
+  beforeEach(() => {
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = {
+      children: new Map(),
+      ensureChild: () => childStore,
+      getChild: () => childStore,
+    };
+    setActionRefs(opencodeClient, childStores, () => '/current/project');
+    setOptimisticRefs(() => {}, () => {});
+    useConfigStore.setState({
+      isConnected: true,
+      currentProviderId: PROVIDER,
+      currentModelId: MODEL,
+      currentAgentName: AGENT,
+      currentVariant: undefined,
+      currentVariantSelection: { override: undefined, inherited: undefined },
+    });
+    useSessionUIStore.setState({
+      currentSessionId: SESSION,
+      currentSessionDirectory: '/current/project',
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+    originalSendMessage = opencodeClient.sendMessage;
+    opencodeClient.sendMessage = async () => 'msg';
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, undefined);
+  });
+
+  const send = (variant) => useSessionUIStore.getState().sendMessage(
+    'hello', PROVIDER, MODEL, AGENT, undefined, undefined, undefined, variant, 'normal',
+  );
+
+  test('keeps an explicit Default across the send that follows it', async () => {
+    // What the picker leaves behind: `null` recorded, and a send that carries
+    // no effort because "Default" means exactly that.
+    useSelectionStore.getState().saveAgentModelVariantForSession(SESSION, AGENT, PROVIDER, MODEL, null);
+    useConfigStore.setState({ currentVariantSelection: { override: null, inherited: 'high' } });
+
+    await send(undefined);
+
+    expect(readRecord()).toBeNull();
+  });
+
+  test('records the effort a send carries', async () => {
+    useConfigStore.setState({ currentVariantSelection: { override: 'high', inherited: 'high' } });
+
+    await send('high');
+
+    expect(readRecord()).toBe('high');
+  });
+
+  test('records no choice when the live selection inherits its effort', async () => {
+    useConfigStore.setState({
+      currentVariant: 'high',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+    });
+
+    await send('high');
+
+    expect(readRecord()).toBe(undefined);
+  });
+});
+
+const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
+opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/Users/tester' });
+await ensureChatsRootDirectory();
+opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
+describe('missing session directory recovery', () => {
+  const missingWorktree = '/projects/main/.worktrees/gone';
+  const projectDirectory = '/projects/main';
+  const moves = [];
+  const probes = [];
+  let availability = 'missing';
+  let originalGetDirectoryAvailability;
+  let originalGetSdkClient;
+  let originalProjects;
+  let originalActiveProjectId;
+  let originalDirectoryState;
+  let originalClientDirectory;
+  let originalGlobalState;
+
+  const worktreeSession = (id, directory, parentID = null) => ({
+    id,
+    parentID: parentID ?? undefined,
+    projectID: 'project-main',
+    directory,
+    project: { worktree: projectDirectory },
+    title: id,
+    version: '1',
+    time: { created: 1, updated: 1 },
+  });
+
+  const settle = async () => {
+    for (let index = 0; index < 10; index += 1) await Bun.sleep(0);
+  };
+
+  beforeEach(() => {
+    moves.length = 0;
+    probes.length = 0;
+    availability = 'missing';
+    originalGetDirectoryAvailability = opencodeClient.getDirectoryAvailability;
+    originalGetSdkClient = opencodeClient.getSdkClient;
+    originalProjects = useProjectsStore.getState().projects;
+    originalActiveProjectId = useProjectsStore.getState().activeProjectId;
+    originalDirectoryState = useDirectoryStore.getState();
+    originalClientDirectory = opencodeClient.getDirectory();
+    originalGlobalState = useGlobalSessionsStore.getState();
+
+    const childStore = {
+      getState: () => ({ session: [], message: {}, part: {}, session_status: {} }),
+      setState: () => {},
+    };
+    const childStores = { children: new Map(), ensureChild: () => childStore, getChild: () => childStore };
+    setActionRefs({
+      project: { list: async () => ({ data: [{ id: 'project-main', worktree: projectDirectory }] }) },
+      session: { messages: async () => ({ data: [] }) },
+    }, childStores, () => projectDirectory);
+    setOptimisticRefs(() => {}, () => {});
+    opencodeClient.getSdkClient = () => ({
+      experimental: { controlPlane: { moveSession: async (params) => { moves.push(params); return {}; } } },
+    });
+    opencodeClient.getDirectoryAvailability = async (directory) => {
+      probes.push(directory);
+      return availability;
+    };
+    useProjectsStore.setState({
+      projects: [{ id: 'project-main', path: projectDirectory, label: 'Main' }],
+      activeProjectId: 'project-main',
+    });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      worktreeMetadata: new Map(),
+      newSessionDraft: { open: false, directoryOverride: null, parentID: null },
+    });
+  });
+
+  afterEach(() => {
+    opencodeClient.getDirectoryAvailability = originalGetDirectoryAvailability;
+    opencodeClient.getSdkClient = originalGetSdkClient;
+    useProjectsStore.setState({ projects: originalProjects, activeProjectId: originalActiveProjectId });
+    useDirectoryStore.setState(originalDirectoryState, true);
+    useGlobalSessionsStore.setState(originalGlobalState, true);
+    opencodeClient.setDirectory(originalClientDirectory ?? undefined);
+    useSessionUIStore.setState({ currentSessionId: null, currentSessionDirectory: null, worktreeMetadata: new Map() });
+  });
+
+  test('leaves a missing worktree session in place on activation and does not probe or relocate it', async () => {
+    const root = worktreeSession('root', missingWorktree);
+    useGlobalSessionsStore.setState({ activeSessions: [root], archivedSessions: [] });
+
+    useSessionUIStore.getState().setCurrentSession('root', missingWorktree);
+    await settle();
+
+    expect(probes).toEqual([]);
+    expect(moves).toEqual([]);
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe(missingWorktree);
+    expect(useSessionUIStore.getState().getDirectoryForSession('root')).toBe(missingWorktree);
+  });
+
+  test('never probes a session that lives in its project root or in a managed chat directory', async () => {
+    const chatDirectory = '/Users/tester/.config/openchamber/chats/2026-09-05/session-abc';
+    useGlobalSessionsStore.setState({
+      activeSessions: [worktreeSession('in-root', projectDirectory), worktreeSession('chat', chatDirectory)],
+      archivedSessions: [],
+    });
+
+    useSessionUIStore.getState().setCurrentSession('in-root', projectDirectory);
+    await settle();
+    useSessionUIStore.getState().setCurrentSession('chat', chatDirectory);
+    await settle();
+
+    expect(probes).toEqual([]);
+    expect(moves).toEqual([]);
   });
 });

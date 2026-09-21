@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { persist } from 'zustand/middleware';
 import type { GitHubPullRequestStatus, RuntimeAPIs } from '@/lib/api/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
@@ -238,11 +239,11 @@ const findResolvedSiblingEntry = (
  * instead of a single key: the entry being actively watched/refreshed may be
  * keyed by a concrete remote while the 'auto' entry goes stale.
  */
-export const getFreshestPrStatusForBranch = (
+const getFreshestPrEntryForBranch = (
   entries: Record<string, PrStatusEntry>,
   directory: string,
   branch: string,
-): GitHubPullRequestStatus | null => {
+): PrStatusEntry | null => {
   const runtimeKey = getRuntimeKey();
   let best: PrStatusEntry | null = null;
   for (const [key, entry] of Object.entries(entries)) {
@@ -260,7 +261,15 @@ export const getFreshestPrStatusForBranch = (
       best = entry;
     }
   }
-  return best?.status ?? null;
+  return best;
+};
+
+export const getFreshestPrStatusForBranch = (
+  entries: Record<string, PrStatusEntry>,
+  directory: string,
+  branch: string,
+): GitHubPullRequestStatus | null => {
+  return getFreshestPrEntryForBranch(entries, directory, branch)?.status ?? null;
 };
 
 const getKeysBySignature = (entries: Record<string, PrStatusEntry>, signature: string): string[] => {
@@ -691,6 +700,7 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
           return;
         }
 
+        const requestPrStatus = params.github.prStatus.bind(params.github);
         try {
           set((prev) => ({
             ...prev,
@@ -698,18 +708,19 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
             totalRequestCount: prev.totalRequestCount + 1,
           }));
           await acquirePrStatusNetworkSlot();
-          let next: GitHubPullRequestStatus;
+          let next: GitHubPullRequestStatus | null;
           try {
-            if (!isCurrent()) return;
-            // Failed requests need the same non-forced cooldown as successful
-            // refreshes. Record only work that reaches the network slot so a
-            // stale queued request cannot suppress its replacement.
-            lastRefreshBySignature.set(signature, Date.now());
-            next = await params.github.prStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+            next = await runBackgroundNetworkTask(async () => {
+              if (!isCurrent()) return null;
+              // Keep PR reads inside the aggregate HTTP budget as well as the
+              // PR-specific cap. Separate caps otherwise occupy every socket.
+              lastRefreshBySignature.set(signature, Date.now());
+              return requestPrStatus(params.directory, params.branch, params.remoteName ?? undefined, { force: options?.force });
+            });
           } finally {
             releasePrStatusNetworkSlot();
           }
-          if (!isCurrent()) return;
+          if (!next || !isCurrent()) return;
           set((prev) => {
             const nextEntries = { ...prev.entries };
             signatureKeys.forEach((signatureKey) => {
@@ -951,23 +962,39 @@ const summarySignature = (s: PrVisualSummary): string =>
 const PR_SUMMARY_CACHE_MAX_ENTRIES = 300;
 const prSummaryCacheByKey = new Map<string, { sig: string; summary: PrVisualSummary }>();
 
+const getCachedPrSummary = (cacheKey: string, entry: PrStatusEntry | null | undefined): PrVisualSummary | null => {
+  const summary = entry ? deriveSummary(entry) : null;
+  if (!summary) {
+    prSummaryCacheByKey.delete(cacheKey);
+    return null;
+  }
+
+  const sig = summarySignature(summary);
+  const cached = prSummaryCacheByKey.get(cacheKey);
+  if (cached?.sig === sig) return cached.summary;
+
+  if (!cached && prSummaryCacheByKey.size >= PR_SUMMARY_CACHE_MAX_ENTRIES) {
+    const oldestKey = prSummaryCacheByKey.keys().next().value;
+    if (oldestKey !== undefined) prSummaryCacheByKey.delete(oldestKey);
+  }
+  prSummaryCacheByKey.set(cacheKey, { sig, summary });
+  return summary;
+};
+
 export const usePrVisualSummary = (key: string | null): PrVisualSummary | null => {
   return useGitHubPrStatusStore((state) => {
     if (!key) return null;
-    const entry = state.entries[key];
-    const summary = entry ? deriveSummary(entry) : null;
-    if (!summary) {
-      prSummaryCacheByKey.delete(key);
-      return null;
-    }
-    const sig = summarySignature(summary);
-    const cached = prSummaryCacheByKey.get(key);
-    if (cached && cached.sig === sig) return cached.summary;
-    if (!cached && prSummaryCacheByKey.size >= PR_SUMMARY_CACHE_MAX_ENTRIES) {
-      const oldestKey = prSummaryCacheByKey.keys().next().value;
-      if (oldestKey !== undefined) prSummaryCacheByKey.delete(oldestKey);
-    }
-    prSummaryCacheByKey.set(key, { sig, summary });
-    return summary;
+    return getCachedPrSummary(key, state.entries[key]);
+  });
+};
+
+export const useFreshestPrVisualSummaryForBranch = (
+  directory: string | null,
+  branch: string | null,
+): PrVisualSummary | null => {
+  const cacheKey = directory && branch ? JSON.stringify(['branch', getRuntimeKey(), directory, branch]) : null;
+  return useGitHubPrStatusStore((state) => {
+    if (!directory || !branch || !cacheKey) return null;
+    return getCachedPrSummary(cacheKey, getFreshestPrEntryForBranch(state.entries, directory, branch));
   });
 };

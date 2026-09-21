@@ -1,10 +1,11 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { requestFileAccess } from '@/lib/desktop';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
-import { parsePlanMarkdown, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
+import { parsePlanMarkdown, resolveProjectContextId, type ProjectPlanLink, type ProjectRef } from '@/lib/projectContextApi';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { cn } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -22,8 +23,9 @@ export const PlansSection: React.FC<{
   plans: ProjectPlanLink[];
   /** Panel-wide filter, matched against plan titles. */
   query: string;
-  /** Hosts without a ContextPanel (mobile) render their own plan viewer. */
-  onOpenPlan?: (plan: { id: string; title: string }) => void;
+  /** Hosts without a ContextPanel (mobile) render their own plan viewer. The
+      plan carries its owner so the host viewer never guesses the project. */
+  onOpenPlan?: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   pinnedPlanIds: ReadonlySet<string>;
   onTogglePinned: (planId: string, pinned: boolean) => Promise<boolean>;
 }> = ({ projectRef, plans, query, onOpenPlan, pinnedPlanIds, onTogglePinned }) => {
@@ -33,6 +35,28 @@ export const PlansSection: React.FC<{
   const [deletingPlanId, setDeletingPlanId] = React.useState<string | null>(null);
   const createPlan = useProjectContextStore((state) => state.createPlan);
   const removePlan = useProjectContextStore((state) => state.deletePlan);
+  const movePlan = useProjectContextStore((state) => state.movePlan);
+  const [movingPlanId, setMovingPlanId] = React.useState<string | null>(null);
+
+  // A plan changes id when it moves between the two folders; the list reloads
+  // from the returned context, so nothing here tracks the new id.
+  const handleMovePlan = React.useCallback(
+    async (plan: ProjectPlanLink) => {
+      if (movingPlanId) return;
+      const direction = plan.source === 'shared' ? 'unshare' : 'share';
+      setMovingPlanId(plan.id);
+      try {
+        const ok = await movePlan(projectRef, plan.id, direction);
+        if (!ok) {
+          const detail = useProjectContextStore.getState().getEntry(projectRef).error;
+          toast.error(t('rightSidebar.contextNotesTodo.toast.movePlanFailed'), detail ? { description: detail } : undefined);
+        }
+      } finally {
+        setMovingPlanId(null);
+      }
+    },
+    [movePlan, movingPlanId, projectRef, t],
+  );
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
 
@@ -146,16 +170,15 @@ export const PlansSection: React.FC<{
     [onTogglePinned, projectRef, t]
   );
 
-  const visiblePlans = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return plans;
-    return plans.filter((plan) => plan.title.toLowerCase().includes(needle));
-  }, [plans, query]);
+  const visiblePlans = React.useMemo(
+    () => plans.filter((plan) => matchesRankQuery([plan.title], query)),
+    [plans, query],
+  );
 
   const handleOpenPlan = React.useCallback(
     (plan: ProjectPlanLink) => {
       if (onOpenPlan) {
-        onOpenPlan({ id: plan.id, title: plan.title });
+        onOpenPlan({ id: plan.id, title: plan.title, projectRef });
         return;
       }
       const panelDirectory = currentDirectory?.trim() || projectRef.path.trim();
@@ -165,11 +188,15 @@ export const PlansSection: React.FC<{
       openContextPanelTab(panelDirectory, {
         mode: 'plan',
         projectPlanId: plan.id,
-        dedupeKey: `plan:${plan.id}`,
+        projectPlanRef: projectRef,
+        // Storage identity is derived from the project path, not the settings
+        // id, so the tab identity uses the same derivation. Two projects
+        // sharing a settings id but not a path must not merge plan tabs.
+        dedupeKey: `plan:${resolveProjectContextId(projectRef)}:${plan.id}`,
         label: plan.title,
       });
     },
-    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef.path]
+    [currentDirectory, onOpenPlan, openContextPanelTab, projectRef]
   );
 
   return (
@@ -190,7 +217,7 @@ export const PlansSection: React.FC<{
           type="button"
           onClick={handleTriggerImport}
           disabled={isImporting}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
           title={t('rightSidebar.contextNotesTodo.plans.importFromFile')}
         >
@@ -212,18 +239,39 @@ export const PlansSection: React.FC<{
                 <button
                   type="button"
                   onClick={() => handleOpenPlan(plan)}
-                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-1.5 py-1 text-left hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="min-w-0 truncate typography-ui-label text-foreground">{plan.title}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate typography-ui-label text-foreground">{plan.title}</span>
+                    {plan.source === 'shared' ? (
+                      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                        {t('rightSidebar.contextNotesTodo.plans.sharedBadge')}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="flex-shrink-0 typography-micro text-muted-foreground">
                     {new Date(plan.createdAt).toLocaleDateString(getCurrentIntlLocale())}
                   </span>
                 </button>
                 <button
                   type="button"
+                  onClick={() => void handleMovePlan(plan)}
+                  disabled={movingPlanId === plan.id}
+                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  title={plan.source === 'shared'
+                    ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.share')}
+                  aria-label={plan.source === 'shared'
+                    ? t('rightSidebar.contextNotesTodo.plans.makePersonal')
+                    : t('rightSidebar.contextNotesTodo.plans.share')}
+                >
+                  <Icon name={plan.source === 'shared' ? 'user' : 'team'} className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => void handleTogglePinned(plan.id, !pinnedPlanIds.has(plan.id))}
                   className={cn(
-                    'inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     pinnedPlanIds.has(plan.id) ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
                   )}
                   aria-pressed={pinnedPlanIds.has(plan.id)}
@@ -240,7 +288,7 @@ export const PlansSection: React.FC<{
                   type="button"
                   onClick={() => void handleDeletePlan(plan.id)}
                   disabled={deletingPlanId === plan.id}
-                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   title={t('rightSidebar.contextNotesTodo.plans.deletePlan')}
                   aria-label={t('rightSidebar.contextNotesTodo.plans.deletePlanWithTitle', { title: plan.title })}
                 >

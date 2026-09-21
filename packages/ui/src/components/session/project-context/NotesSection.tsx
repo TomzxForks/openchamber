@@ -1,3 +1,4 @@
+import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
 
 import { toast } from '@/components/ui';
@@ -107,7 +108,7 @@ const NoteRow: React.FC<{
             type="button"
             onClick={onTogglePinned}
             className={cn(
-              'inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+              'inline-flex h-6 w-6 items-center justify-center rounded-md hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               pinned ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
             )}
             aria-pressed={pinned}
@@ -125,7 +126,7 @@ const NoteRow: React.FC<{
           <button
             type="button"
             onClick={onDelete}
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('rightSidebar.contextNotesTodo.notes.actions.delete')}
             title={t('rightSidebar.contextNotesTodo.notes.actions.delete')}
           >
@@ -178,11 +179,10 @@ export const NotesSection: React.FC<{
   const saveNoteBody = useProjectContextStore((state) => state.saveNoteBody);
   const deleteNote = useProjectContextStore((state) => state.deleteNote);
 
-  const visibleNotes = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return notes;
-    return notes.filter((note) => note.body.toLowerCase().includes(needle));
-  }, [notes, query]);
+  const visibleNotes = React.useMemo(
+    () => notes.filter((note) => matchesRankQuery([note.body], query)),
+    [notes, query],
+  );
 
   // The store keeps the failure reason; without passing it through, every
   // failure looks identical to the user and tells them nothing about the cause.
@@ -258,7 +258,7 @@ export const NotesSection: React.FC<{
               type="button"
               onClick={() => void handleAdd()}
               disabled={disabled || composerText.trim().length === 0}
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={t('rightSidebar.contextNotesTodo.notes.addAria')}
               title={t('rightSidebar.contextNotesTodo.notes.addAria')}
             >

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { scheduleCachedStateRetries } from './webviewCachedStateRetry';
 import { handleBridgeMessage, type BridgeRequest, type BridgeResponse } from './bridge';
 import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
@@ -22,6 +23,19 @@ export class AgentManagerPanelProvider {
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
   private readonly _webviewDevServerUrl: string | null;
+
+  /**
+   * See webviewCachedStateRetry.ts — a single postMessage can be dropped
+   * before the webview bridge is ready, leaving the loading screen stuck.
+   */
+  private _scheduleCachedStateRetries(targetPanel: vscode.WebviewPanel | undefined): void {
+    scheduleCachedStateRetries({
+      target: targetPanel ?? this._panel,
+      getCurrent: () => this._panel,
+      isConnected: () => this._cachedStatus === 'connected',
+      send: () => this._sendCachedState(),
+    });
+  }
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
@@ -64,6 +78,13 @@ export class AgentManagerPanelProvider {
 
     // Send cached connection status
     this._sendCachedState();
+    // The webview bridge may not be ready yet; keep re-sending so a dropped
+    // `connectionStatus` can never leave the webview stuck on its loading screen.
+    this._scheduleCachedStateRetries(this._panel);
+
+    this._panel.onDidChangeViewState(() => {
+      this.notifyViewerStateChanged();
+    }, null, this._context.subscriptions);
 
     // Handle panel disposal
     this._panel.onDidDispose(() => {
@@ -78,6 +99,15 @@ export class AgentManagerPanelProvider {
 
     // Handle messages
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+      if (message.type === 'webview:ready') {
+        for (const controller of this._sseStreams.values()) {
+          controller.abort();
+        }
+        this._sseStreams.clear();
+        this._sendCachedState();
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
@@ -126,6 +156,13 @@ export class AgentManagerPanelProvider {
 
     // Send to webview if it exists
     this._sendCachedState();
+
+    // When we become connected, keep re-sending at staggered delays so the
+    // webview cannot miss the transition (postMessage is dropped if the
+    // webview bridge is not ready yet).
+    if (status === 'connected') {
+      this._scheduleCachedStateRetries(this._panel);
+    }
   }
 
   public notifySettingsSynced(settings: unknown): void {
@@ -148,15 +185,16 @@ export class AgentManagerPanelProvider {
     });
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells the webview whether the user can see it: VS Code focused and the panel shown. */
+  public notifyViewerStateChanged(): void {
     if (!this._panel) {
       return;
     }
 
     this._panel.webview.postMessage({
       type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: this._panel.visible },
     });
   }
 
@@ -170,7 +208,7 @@ export class AgentManagerPanelProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
+    this.notifyViewerStateChanged();
   }
 
   private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {

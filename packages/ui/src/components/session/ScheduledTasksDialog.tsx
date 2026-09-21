@@ -368,13 +368,9 @@ export function ScheduledTasksDialog() {
       return;
     }
     setOpen(false);
-    if (isMobile) {
-      useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
-      useUIStore.getState().setActiveMainTab('files');
-      return;
-    }
+    useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
     useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
-  }, [isMobile, selectedProject?.path, setOpen]);
+  }, [selectedProject?.path, setOpen]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -397,8 +393,7 @@ export function ScheduledTasksDialog() {
         // this surface (MainLayout closes surfaces on session selection).
         const project = projects.find((entry) => entry.id === selectedProjectID);
         useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
-        useUIStore.getState().setActiveMainTab('chat');
-      }
+        }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {
@@ -485,10 +480,9 @@ export function ScheduledTasksDialog() {
                 key={task.id}
                 className={cn(
                   'rounded-lg border border-border p-4 transition-opacity',
-                  !task.enabled && 'opacity-60',
                 )}
               >
-                <div className="min-w-0">
+                <div className={cn('min-w-0', !task.enabled && 'opacity-60')}>
                   <div className="typography-ui-header truncate font-semibold text-foreground">
                     {task.name}
                   </div>
@@ -505,7 +499,7 @@ export function ScheduledTasksDialog() {
                   ) : null}
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
+                <div className={cn('mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground', !task.enabled && 'opacity-60')}>
                   <span className="inline-flex items-center gap-1.5">
                     <Icon name="timer" className="h-3.5 w-3.5" />
                     <span className="font-medium text-foreground">{t('sessions.scheduledTasks.dialog.nextRun.label')}</span>
@@ -552,7 +546,7 @@ export function ScheduledTasksDialog() {
 
                 {task.state?.lastError ? (
                   <div
-                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
+                    className={cn('mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro', !task.enabled && 'opacity-60')}
                     style={toneStyle('error')}
                   >
                     <Icon name="error-warning" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -659,7 +653,7 @@ export function ScheduledTasksDialog() {
         // Master-detail: a scrollable project filter panel at the left, the
         // selected project's tasks at the right. The app Header shows the
         // surface title, so the page itself only carries the close affordance.
-        <div className="absolute inset-0 z-10 flex flex-col bg-background">
+        <div className="absolute inset-0 z-10 flex flex-col bg-surface-elevated">
           <div className="flex min-h-0 flex-1">
             <div className="flex w-60 flex-shrink-0 flex-col border-r border-border/50">
               <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
@@ -673,7 +667,7 @@ export function ScheduledTasksDialog() {
                     type="button"
                     onClick={() => selectProject(project.id)}
                     className={cn(
-                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       selectedProjectID === project.id
                         ? 'bg-interactive-selection text-foreground'
                         : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',

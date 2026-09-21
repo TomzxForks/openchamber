@@ -1,10 +1,12 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
-import { readConfig, readConfigLayers } from '../opencode/shared.js';
+import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
+import { getRuntimeProvider } from './runtime-providers.js';
 
 // Direct, non-streaming text generation against the provider APIs, replicating
 // how OpenCode authenticates each of them (see the plugin auth loaders in the
@@ -17,6 +19,37 @@ const COPILOT_MODELS_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_000;
 
 const USER_AGENT = 'opencode/1.0 openchamber';
+
+// Providers whose endpoint lives inside their dedicated AI SDK package, so the
+// models.dev catalog carries no `api` URL and OpenCode reports none at runtime.
+// Each of these serves OpenAI-compatible `/chat/completions` at the URL below.
+const SDK_DEFAULT_BASE_URLS = new Map([
+  ['groq', 'https://api.groq.com/openai/v1'],
+  ['xai', 'https://api.x.ai/v1'],
+  ['mistral', 'https://api.mistral.ai/v1'],
+  ['cerebras', 'https://api.cerebras.ai/v1'],
+  ['togetherai', 'https://api.together.xyz/v1'],
+  ['deepinfra', 'https://api.deepinfra.com/v1/openai'],
+  ['perplexity', 'https://api.perplexity.ai'],
+  ['cohere', 'https://api.cohere.ai/compatibility/v1'],
+]);
+
+// Where `thinking: { type: 'disabled' }` is a real switch rather than an
+// unknown field (mirrors the gates in OpenCode's provider/transform.ts).
+const ZAI_ENDPOINT_HOSTS = ['api.z.ai', 'bigmodel.cn'];
+const MINIMAX_THINKING_ADAPTERS = new Set(['@ai-sdk/openai-compatible', '@ai-sdk/anthropic']);
+
+const mergeHeadersCaseInsensitive = (base, overrides) => {
+  const merged = { ...base };
+  for (const [name, value] of Object.entries(overrides || {})) {
+    const existingName = Object.keys(merged).find((key) => key.toLowerCase() === name.toLowerCase());
+    if (existingName) {
+      delete merged[existingName];
+    }
+    merged[name] = value;
+  }
+  return merged;
+};
 
 const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -156,11 +189,10 @@ const callOpenaiCompatible = async ({ baseURL, headers, modelID, prompt, system,
   });
   const response = await fetch(`${trimmedBase}/chat/completions`, {
     method: 'POST',
-    headers: {
+    headers: mergeHeadersCaseInsensitive({
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      ...headers,
-    },
+    }, headers),
     body: JSON.stringify({
       model: modelID,
       messages: [
@@ -339,8 +371,11 @@ const callMessages = async ({ url, headers, modelID, prompt, system, maxOutputTo
   return text;
 };
 
-const callAnthropic = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
-  url: 'https://api.anthropic.com/v1/messages',
+const callAnthropic = async ({ apiKey, baseURL, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => callMessages({
+  // Matches @ai-sdk/anthropic: baseURL is the full API prefix (commonly
+  // already ending in /v1), so it gets /messages appended as-is rather than
+  // having /v1/messages appended, which would double up a configured /v1.
+  url: `${(baseURL || 'https://api.anthropic.com/v1').replace(/\/+$/, '')}/messages`,
   headers: {
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
@@ -402,9 +437,10 @@ const getCopilotEndpoint = async ({ baseURL, headers, modelID }) => {
 
 const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelID)}:generateContent`;
-  const thinkingConfig = modelID.toLowerCase().startsWith('gemini-3')
-    ? { thinkingLevel: modelID.toLowerCase().includes('flash') ? 'minimal' : 'low' }
-    : { thinkingBudget: 0 };
+  const lowerModelID = modelID.toLowerCase();
+  const thinkingConfig = lowerModelID.startsWith('gemini-3')
+    ? { thinkingLevel: lowerModelID.includes('flash') ? 'minimal' : 'low' }
+    : lowerModelID.startsWith('gemini-2') ? { thinkingBudget: 0 } : null;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -414,13 +450,11 @@ const callGoogle = async ({ apiKey, modelID, prompt, system, maxOutputTokens, re
     },
     body: JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(system && { systemInstruction: { parts: [{ text: system }] } }),
       generationConfig: {
         maxOutputTokens,
-        thinkingConfig,
-        ...(responseSchema
-          ? { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }
-          : {}),
+        ...(thinkingConfig && { thinkingConfig }),
+        ...(responseSchema && { responseMimeType: 'application/json', responseSchema: toGoogleSchema(responseSchema) }),
       },
     }),
     signal: requestSignal(timeoutMs, signal),
@@ -507,7 +541,7 @@ const callCodexResponses = async ({ accessToken, accountId, modelID, prompt, sys
 // Custom provider configuration support
 // ---------------------------------------------------------------------------
 
-const resolveConfigApiKey = (value, workingDirectory, providerID) => {
+const resolveConfigValue = (value, workingDirectory, providerID, headerName = null) => {
   const envMatch = value.match(/^\{env:([^}]+)\}$/i);
   if (envMatch) {
     return process.env[envMatch[1].trim()]?.trim() || null;
@@ -528,7 +562,12 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
       { config: layers.customConfig, filePath: layers.paths.customPath },
       { config: layers.projectConfig, filePath: layers.paths.projectPath },
       { config: layers.userConfig, filePath: layers.paths.userPath },
-    ].find(({ config }) => config?.provider?.[providerID]?.options?.apiKey === value);
+    ].find(({ config }) => {
+      const options = config?.provider?.[providerID]?.options;
+      return headerName
+        ? options?.headers?.[headerName] === value
+        : options?.apiKey === value;
+    });
     resolvedPath = path.resolve(source?.filePath ? path.dirname(source.filePath) : workingDirectory || process.cwd(), configuredPath);
   }
 
@@ -537,8 +576,31 @@ const resolveConfigApiKey = (value, workingDirectory, providerID) => {
     if (!key) throw new Error('empty file');
     return key;
   } catch {
-    throw new Error(`Failed to resolve configured apiKey file for provider "${providerID}"`);
+    throw new Error(`Failed to resolve configured ${headerName ? `header "${headerName}"` : 'apiKey'} file for provider "${providerID}"`);
   }
+};
+
+/**
+ * `options.headers` from the provider config, with the same `{env:…}`/`{file:…}`
+ * substitutions the API key gets.
+ *
+ * OpenCode sends these on every request, so dropping them here would have the
+ * small model authenticating differently from the request path against the same
+ * URL. Gateways fronted by an API-management layer reject a bearer-only request
+ * outright, because the header is the credential rather than a supplement to it.
+ */
+const readConfiguredHeaders = (providerCfg, workingDirectory, providerID) => {
+  const configured = providerCfg?.options?.headers;
+  if (!isPlainObject(configured)) return null;
+  const headers = {};
+  for (const [name, value] of Object.entries(configured)) {
+    // Config headers are strings; a malformed entry is skipped rather than
+    // stringified into a header the gateway would reject.
+    if (String(value) !== value) continue;
+    const resolved = resolveConfigValue(value.trim(), workingDirectory, providerID, name);
+    if (resolved) headers[name] = resolved;
+  }
+  return Object.keys(headers).length ? headers : null;
 };
 
 const readProviderConfig = (workingDirectory, providerID) => {
@@ -548,9 +610,10 @@ const readProviderConfig = (workingDirectory, providerID) => {
     if (!providerCfg || typeof providerCfg !== 'object') return null;
     const baseURL = typeof providerCfg?.options?.baseURL === 'string' ? providerCfg.options.baseURL.trim() : null;
     const rawApiKey = typeof providerCfg?.options?.apiKey === 'string' ? providerCfg.options.apiKey.trim() : null;
-    const apiKey = rawApiKey ? resolveConfigApiKey(rawApiKey, workingDirectory, providerID) : null;
+    const apiKey = rawApiKey ? resolveConfigValue(rawApiKey, workingDirectory, providerID) : null;
     return {
       baseURL,
+      headers: readConfiguredHeaders(providerCfg, workingDirectory, providerID),
       // Shape the config-supplied key as a regular api-key auth entry so it
       // can win the precedence check below and flow through the dispatch's
       // `entry.type === 'api' ? entry.key : ...` branch unchanged.
@@ -562,27 +625,59 @@ const readProviderConfig = (workingDirectory, providerID) => {
   }
 }
 
+const getRuntimeModel = (runtimeProvider, modelID) => runtimeProvider?.models?.get(modelID) ?? null;
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
 /**
+ * Providers reached through a dedicated wire format below: a token exchange,
+ * an OAuth refresh, or a non-bearer header. OpenCode's runtime
+ * `options.apiKey` is not the value those branches need — the ChatGPT-plan
+ * `openai` login is the clearest case, where the runtime key is an OAuth
+ * access token that api.openai.com answers with 401 — so the runtime
+ * credential never stands in for them, and the runtime listing skips them
+ * because the auth.json scan already covers them.
+ */
+export const DEDICATED_WIRE_FORMAT_PROVIDERS = new Set(['github-copilot', 'copilot', 'openai', 'anthropic', 'google']);
+
+/**
+ * The runtime credential shaped as an auth entry, or `null` when the provider
+ * owns its credential handling or OpenCode reports nothing usable.
+ */
+const runtimeCredential = (providerID, runtime) => (
+  !DEDICATED_WIRE_FORMAT_PROVIDERS.has(providerID) && runtime?.apiKey
+    ? { type: 'api', key: runtime.apiKey }
+    : null
+);
+
+/**
  * Same credential resolution the request path uses: config
- * `provider.<id>.options.apiKey` wins, then the auth.json entry.
+ * `provider.<id>.options.apiKey` wins, then the runtime credential OpenCode
+ * resolved for a plugin provider, then the auth.json entry.
  * Callers that need to refuse before spending a request (walkthrough readiness)
  * must use this rather than inventing a second rule.
  */
-export function resolveProviderLogin({ auth, workingDirectory, providerID }) {
+export async function resolveProviderLogin({ auth, workingDirectory, providerID }) {
   const providerConfig = readProviderConfig(workingDirectory, providerID);
-  return providerConfig?.auth || getAuthEntryForProvider(auth, providerID) || null;
+  return providerConfig?.auth
+    || runtimeCredential(providerID, await getRuntimeProvider(providerID))
+    || getAuthEntryForProvider(auth, providerID)
+    || null;
 }
 
-export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
+export async function callSmallModel({ auth, catalog, workingDirectory, sessionID, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
-  // Match OpenCode's resolveSDK precedence:
-  // config provider.<id>.options.apiKey wins; the auth.json entry is only a fallback.
-  const entry = providerConfig?.auth || getAuthEntryForProvider(auth, providerID);
+  const runtimeProvider = await getRuntimeProvider(providerID);
+  const runtimeModel = getRuntimeModel(runtimeProvider, modelID);
+  // Match OpenCode's resolveSDK precedence: config `provider.<id>.options`
+  // wins, then what OpenCode itself resolved at runtime (the only place a
+  // plugin's credential exists), and the auth.json entry last.
+  const entry = providerConfig?.auth
+    || runtimeCredential(providerID, runtimeProvider)
+    || getAuthEntryForProvider(auth, providerID);
   if (!entry) {
     // Structured so the walkthrough (and any other caller) can show a blocker
     // instead of a raw 500 banner with this developer-oriented sentence.
@@ -676,7 +771,7 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   }
 
   if (providerID === 'anthropic') {
-    return callAnthropic({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
+    return callAnthropic({ apiKey, baseURL: providerConfig?.baseURL, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
   }
   if (providerID === 'google') {
     return callGoogle({ apiKey, modelID, prompt, system, maxOutputTokens: tokens, responseSchema, timeoutMs, signal });
@@ -685,9 +780,14 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   // Everything else: OpenAI-compatible chat completions against the catalog's
   // base URL for that provider (openai itself included). When a custom provider
   // is not in the catalog (e.g. a user-configured OpenAI-compatible proxy),
-  // fall back to its baseURL from the OpenCode provider config. The openai
-  // provider also respects provider.openai.options.baseURL — OpenCode itself
-  // uses the same config for all providers including openai.
+  // fall back to its baseURL from the OpenCode provider config, then to the
+  // selected model's endpoint OpenCode resolved at runtime, then to the
+  // provider-level runtime endpoint. For a plugin provider, the runtime listing
+  // is the only place those endpoints exist, and several are local proxies the
+  // plugin itself runs. Last comes SDK_DEFAULT_BASE_URLS, for providers whose
+  // endpoint only their SDK package knows. The openai provider also respects
+  // provider.openai.options.baseURL — OpenCode itself uses the same config for
+  // all providers including openai.
   const provider = getCatalogProvider(catalog, providerID);
   const providerConfigUrl = providerConfig?.baseURL;
   const defaultOpenaiUrl = 'https://api.openai.com/v1';
@@ -695,9 +795,11 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     ? providerConfigUrl
     : providerID === 'openai'
       ? defaultOpenaiUrl
-      : typeof provider?.api === 'string' && provider.api
-        ? provider.api
-        : null;
+      : runtimeModel?.api?.url
+        ?? runtimeProvider?.baseURL
+        ?? (typeof provider?.api === 'string' && provider.api
+          ? provider.api
+          : SDK_DEFAULT_BASE_URLS.get(providerID) ?? null);
   if (!baseURL) {
     throw new Error(`Provider "${providerID}" has no known API base URL`);
   }
@@ -708,16 +810,34 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
   // parameter: unknown body fields 400 on some providers, so this stays an
   // explicit allowlist. Models without a switch (DeepSeek, Qwen, Kimi, …)
   // just get the generous output budget.
-  const lowerModel = modelID.toLowerCase();
-  const supportsThinkingToggle = providerID.includes('zai')
+  // GLM's switch belongs to the Z.ai/Zhipu endpoints, not to the model: the
+  // same GLM served by another provider (OpenCode Go) rejects the field. The
+  // host check keeps the switch for a custom-named provider pointed at them.
+  const servedByZai = providerID.includes('zai')
     || providerID.includes('zhipu')
-    || lowerModel.includes('glm')
-    || lowerModel.includes('minimax-m3');
+    || ZAI_ENDPOINT_HOSTS.some((host) => baseURL.includes(host));
+  // MiniMax M3's switch is understood only behind the adapters OpenCode sends
+  // it through. An adapter nobody reports (a custom provider) is OpenAI-
+  // compatible by OpenCode's own default.
+  const adapter = runtimeModel?.api?.npm
+    ?? provider?.models?.[modelID]?.provider?.npm
+    ?? provider?.npm
+    ?? null;
+  const minimaxSwitch = modelID.toLowerCase().includes('minimax-m3')
+    && (adapter === null || MINIMAX_THINKING_ADAPTERS.has(adapter));
+  const supportsThinkingToggle = servedByZai || minimaxSwitch;
   const extraBody = supportsThinkingToggle ? { thinking: { type: 'disabled' } } : undefined;
 
   return callOpenaiCompatible({
     baseURL,
-    headers: { Authorization: `Bearer ${apiKey}` },
+    // Configured headers last: a gateway that authenticates on its own header
+    // must be able to override the bearer default rather than sit beside it.
+    headers: mergeHeadersCaseInsensitive(
+      mergeHeadersCaseInsensitive({ Authorization: `Bearer ${apiKey}` }, providerConfig?.headers),
+      providerID.startsWith('opencode')
+        ? { 'x-opencode-session': typeof sessionID === 'string' && sessionID.trim() ? sessionID.trim() : randomUUID() }
+        : null,
+    ),
     modelID,
     prompt,
     system,
