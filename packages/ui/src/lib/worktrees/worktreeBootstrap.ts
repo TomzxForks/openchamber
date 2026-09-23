@@ -25,6 +25,23 @@ const watchers = new Map<string, { cancelled: boolean; lifecycleVersion: number 
 const getKey = (directory: string): string => normalizePath(directory);
 const getWaiterKey = (key: string, target: WorktreeBootstrapTarget): string => `${key}\n${target}`;
 
+// UI surfaces subscribe to know when a directory enters or leaves bootstrap,
+// so a half-created worktree's transient files are never shown as changes.
+const bootstrapListeners = new Set<() => void>();
+
+const notifyBootstrapListeners = (): void => {
+  for (const listener of bootstrapListeners) {
+    listener();
+  }
+};
+
+export const subscribeWorktreeBootstrapState = (listener: () => void): (() => void) => {
+  bootstrapListeners.add(listener);
+  return () => {
+    bootstrapListeners.delete(listener);
+  };
+};
+
 const startLifecycle = (key: string): void => {
   const watcher = watchers.get(key);
   if (watcher) {
@@ -73,6 +90,7 @@ const storePolledState = (
   }
 
   state.set(key, next);
+  notifyBootstrapListeners();
   return next;
 };
 
@@ -99,6 +117,7 @@ export const markWorktreeBootstrapPending = (directory: string): void => {
     error: null,
     updatedAt: Date.now(),
   });
+  notifyBootstrapListeners();
 };
 
 export const clearWorktreeBootstrapState = (directory: string): void => {
@@ -109,6 +128,7 @@ export const clearWorktreeBootstrapState = (directory: string): void => {
   startLifecycle(key);
   state.delete(key);
   lifecycleVersions.delete(key);
+  notifyBootstrapListeners();
 };
 
 export const setWorktreeBootstrapState = (directory: string, next: WorktreeBootstrapState): void => {
@@ -118,6 +138,7 @@ export const setWorktreeBootstrapState = (directory: string, next: WorktreeBoots
   }
   startLifecycle(key);
   state.set(key, next);
+  notifyBootstrapListeners();
 };
 
 export const getWorktreeBootstrapState = (directory: string): WorktreeBootstrapState | null => {

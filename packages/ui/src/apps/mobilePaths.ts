@@ -1,6 +1,7 @@
-import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
+import { normalizePath as normalizeDirectoryPath } from '@/lib/pathNormalization';
 
-export const normalizePath = (value?: string | null): string => normalizePathImpl(value) ?? '';
+export const normalizePath = (value?: string | null): string =>
+  normalizeDirectoryPath(value) ?? '';
 
 export const getProjectLabel = (path: string): string => {
   const normalized = normalizePath(path);

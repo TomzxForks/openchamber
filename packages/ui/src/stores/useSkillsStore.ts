@@ -10,7 +10,6 @@ import {
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from "@/lib/background-network";
-import { noteDeferredRestartFromPayload } from "@/lib/opencode/deferredRestart";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
@@ -173,6 +172,12 @@ interface SkillsStore {
   renameSkill: (name: string, newName: string, directory?: string | null) => Promise<boolean>;
   deleteSkill: (name: string, directory?: string | null) => Promise<boolean>;
   getSkillByName: (name: string, directory?: string | null) => DiscoveredSkill | undefined;
+  /**
+   * Skills are discovered on the connected instance and cached by directory,
+   * which two instances can share — so a switch must drop the caches rather
+   * than report the previous instance's skills for the new one.
+   */
+  resetForRuntimeSwitch: () => void;
 
   // Supporting files
   readSupportingFile: (skillName: string, filePath: string, directory?: string | null) => Promise<string | null>;
@@ -192,6 +197,10 @@ const SKILLS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CACHE_KEY = '__default__';
 const skillsLastLoadedAt = new Map<string, number>();
 const skillsLoadInFlight = new Map<string, Promise<boolean>>();
+// Bumped on every runtime switch. Skills are discovered on the connected
+// instance and cached by directory, which two instances can share, so a load
+// already in flight for the previous instance must not write into the new one.
+let skillsGeneration = 0;
 
 const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
@@ -279,6 +288,13 @@ export const useSkillsStore = create<SkillsStore>()(
         isLoading: false,
         skillDraft: null,
 
+        resetForRuntimeSwitch: () => {
+          skillsGeneration += 1;
+          skillsLastLoadedAt.clear();
+          skillsLoadInFlight.clear();
+          set({ skills: [], skillsByDirectory: {}, isLoading: false });
+        },
+
         setSelectedSkill: (name: string | null) => {
           set({ selectedSkillName: name });
         },
@@ -304,6 +320,7 @@ export const useSkillsStore = create<SkillsStore>()(
             return inFlight;
           }
 
+          const generation = skillsGeneration;
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -349,6 +366,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   data.externalSkills ?? null,
                 );
 
+                if (generation !== skillsGeneration) return false;
                 set((state) => {
                   const next: Partial<SkillsStore> = {
                     skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: visibleSkills },
@@ -367,6 +385,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             console.error("Failed to load skills:", lastError);
+            if (generation !== skillsGeneration) return false;
             set((state) => {
               const next: Partial<SkillsStore> = {
                 skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: previousSkills },
@@ -441,12 +460,6 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            if (noteDeferredRestartFromPayload(payload, 'skills', { id: config.name })) {
-              upsertSkillLocal(set, get, config.name, config, directory);
-              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
-              return true;
-            }
-
             if (payload?.requiresReload) {
               startConfigUpdate("Creating skill...");
               await refreshSkillsAfterOpenCodeRestart({
@@ -500,12 +513,6 @@ export const useSkillsStore = create<SkillsStore>()(
               return true;
             }
 
-            if (noteDeferredRestartFromPayload(payload, 'skills', { id: name })) {
-              upsertSkillLocal(set, get, name, config, directory);
-              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
-              return true;
-            }
-
             if (payload?.requiresReload) {
               startConfigUpdate("Updating skill...");
               await refreshSkillsAfterOpenCodeRestart({
@@ -526,8 +533,6 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         renameSkill: async (name: string, newName: string, requestedDirectory?: string | null) => {
-          startConfigUpdate("Renaming skill...");
-          let requiresReload = false;
           try {
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
@@ -550,7 +555,6 @@ export const useSkillsStore = create<SkillsStore>()(
             const needsReload = payload?.requiresReload ?? false;
             invalidateSkillsLoadCache(directory);
             if (needsReload) {
-              requiresReload = true;
               await refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
@@ -565,10 +569,6 @@ export const useSkillsStore = create<SkillsStore>()(
             return loaded;
           } catch {
             return false;
-          } finally {
-            if (!requiresReload) {
-              finishConfigUpdate();
-            }
           }
         },
 
@@ -592,12 +592,6 @@ export const useSkillsStore = create<SkillsStore>()(
 
             if (payload?.requiresManualRestart) {
               removeSkillLocal(set, get, name);
-              return true;
-            }
-
-            if (noteDeferredRestartFromPayload(payload, 'skills', { id: name })) {
-              removeSkillLocal(set, get, name);
-              emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
               return true;
             }
 

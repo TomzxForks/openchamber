@@ -1,3 +1,5 @@
+import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
+
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
@@ -17,12 +19,14 @@ export const createRequestSecurityRuntime = (deps) => {
     if (!cookieHeader || typeof cookieHeader !== 'string') {
       return null;
     }
-    const segments = cookieHeader.split(';');
-    for (const segment of segments) {
+    // Match the exact slot for the host:port this request arrived on. A browser
+    // shares cookies across ports on LAN and loopback hosts. This extracts
+    // notification/session identity, not a CSRF token, using the same name
+    // as ui-auth's session issuance and validation.
+    const expected = sessionCookieNameForRequest(req);
+    for (const segment of cookieHeader.split(';')) {
       const [rawName, ...rest] = segment.split('=');
-      const name = rawName?.trim();
-      if (!name) continue;
-      if (name !== 'oc_ui_session') continue;
+      if (rawName?.trim() !== expected) continue;
       const value = rest.join('=').trim();
       try {
         return decodeURIComponent(value || '');
@@ -103,7 +107,7 @@ export const createRequestSecurityRuntime = (deps) => {
     return { origins, hosts };
   };
 
-  const isRequestOriginAllowed = async (req) => {
+  const isRequestOriginAllowed = (req) => {
     const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
     if (!originHeader) {
       return false;
@@ -120,15 +124,21 @@ export const createRequestSecurityRuntime = (deps) => {
       return false;
     }
 
-    const candidates = await getRequestOriginCandidates(req);
-    if (candidates.origins.has(origin.origin)) return true;
+    const forwardedHostHeader = req.headers['x-forwarded-host'];
+    const forwardedHost = (Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader || '')
+      .split(',')[0].trim().toLowerCase();
+    const hostHeader = req.headers.host;
+    const host = forwardedHost || (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader || '').trim().toLowerCase();
+    if (host && host === origin.host.toLowerCase()) return true;
 
     // TLS commonly ends at a cloud edge before an HTTP hop to OpenChamber.
     // In that setup the browser's Origin is https while a generic reverse
     // proxy reports the upstream request as http. The external host remains
     // authoritative, so compare it directly instead of requiring the proxy to
     // preserve the browser-facing protocol.
-    return candidates.hosts.has(origin.host.toLowerCase());
+    return getRequestOriginCandidates(req).then((candidates) => (
+      candidates.origins.has(origin.origin) || candidates.hosts.has(origin.host.toLowerCase())
+    ));
   };
 
   return {
