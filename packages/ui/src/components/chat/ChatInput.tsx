@@ -4,6 +4,7 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useAgentBackendStore } from '@/stores/useAgentBackendStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -66,6 +67,7 @@ import { useChatColumnSession } from './chatColumnSession';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
+import { AcpModelSelector } from './AcpModelSelector';
 import { useCurrentSessionActivity, useSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
@@ -450,6 +452,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Inside the chat column the composer follows the session the timeline is
     // showing (see chatColumnSession.ts); elsewhere it follows the live one.
     const liveSessionId = useSessionUIStore((s) => s.currentSessionId);
+    // Which agent backend is active, for the composer's backend indicator.
+    const activeBackend = useAgentBackendStore((s) => s.activeBackend);
     const chatColumnSession = useChatColumnSession();
     const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
     React.useEffect(() => {
@@ -1679,7 +1683,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const agentNameToSend = capturedSendConfig?.agent ?? (isBtwActive ? effectiveBtwSelection.agent : currentAgentName);
         const variantToSend = capturedSendConfig?.variant ?? (isBtwActive ? effectiveBtwSelection.variant : currentVariant);
 
-        if (!providerIdToSend || !modelIdToSend) {
+        // Provider/model are OpenCode concepts; the ACP backend does not use
+        // them, so they must not gate ACP prompts (FR-6 isolation).
+        const isAcpActive = useAgentBackendStore.getState().activeBackend === 'acp';
+        if (!isAcpActive && (!providerIdToSend || !modelIdToSend)) {
             console.warn('Cannot send message: provider or model not selected');
             toast.error(t('chat.chatInput.toast.noModelSelected'));
             return;
@@ -1687,7 +1694,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // A message to an isolated space goes only on a model the space holds a key for; otherwise
         // it stays in the input with the reason and the way to the grant dialog.
-        const spaceRefusal = currentSessionId
+        // The ACP backend has no provider to hold a key for, so it skips the check.
+        const spaceRefusal = !providerIdToSend
+            ? null
+            : currentSessionId
             ? spaceModelRefusal({ requestId: null, directory: currentSessionDirectoryForSync ?? currentDirectory ?? null }, providerIdToSend)
             : newSessionDraftOpen
                 ? spaceModelRefusal({ requestId: newSessionDraft?.pendingWorktreeRequestId ?? null, directory: newSessionDraft?.directoryOverride ?? null }, providerIdToSend)
@@ -2086,8 +2096,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     expectedRuntimeKey: submitRuntimeKey,
                     question: primaryText,
                     directory: targetDirectory,
-                    providerID: providerIdToSend,
-                    modelID: modelIdToSend,
+                    providerID: providerIdToSend ?? "",
+                    modelID: modelIdToSend ?? "",
                     agent: agentNameToSend,
                     variant: variantToSend,
                     attachments: sendableAttachments,
@@ -2229,6 +2239,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (allAttachments.length > 0) {
                 useInputStore.getState().restoreAttachedFiles(allAttachments, chatDraftIdentity);
             }
+            // The ACP create path already surfaced the real reason (and the
+            // command it tried) as its own toast. Showing this generic failure
+            // on top of it hid the useful message, especially on mobile where
+            // the newer toast covers the older one.
+            if (sessionActions.consumeLastAcpCreateErrorMessage()) return;
             toast.error(rawMessage || t('chat.chatInput.toast.messageSendFailed'));
         });
 
@@ -3642,14 +3657,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const mobileModelAgentRow = isMobile && !isBtwActive ? (
         // px-3.5 lines the model logo and the agent label up with the attach
         // and mic icons above them; the buttons drop their own padding so the
-        // row alone owns the inset.
+        // row alone owns the inset. The ACP backend has no OpenCode model to
+        // pick, so it names the agent instead of offering an unused model.
         <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
-            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
-            <MemoMobileAgentButton
-                onOpenAgentPanel={handleOpenAgentPanel}
-                onCycleAgent={handleCycleAgent}
-                className="flex-shrink-0 px-0"
-            />
+            {activeBackend === 'acp' ? (
+                <AcpModelSelector sessionId={currentSessionId ?? null} className="min-w-0" />
+            ) : (
+                <>
+                    <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+                    <MemoMobileAgentButton
+                        onOpenAgentPanel={handleOpenAgentPanel}
+                        onCycleAgent={handleCycleAgent}
+                        className="flex-shrink-0 px-0"
+                    />
+                </>
+            )}
         </div>
     ) : null;
 
