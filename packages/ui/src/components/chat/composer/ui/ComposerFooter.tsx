@@ -20,6 +20,8 @@ import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { ModelControls } from '../../ModelControls';
+import { AcpModelSelector } from '@/components/chat/AcpModelSelector';
+import { useAgentBackendStore } from '@/stores/useAgentBackendStore';
 import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 import { FocusModeButton } from './FocusModeButton';
@@ -79,6 +81,7 @@ export interface ComposerFooterProps {
 
 export function ComposerFooter(props: ComposerFooterProps) {
     const { t } = useI18n();
+    const activeBackend = useAgentBackendStore((s) => s.activeBackend);
     const {
         isMobile,
         isVSCode,
@@ -254,7 +257,11 @@ export function ComposerFooter(props: ComposerFooterProps) {
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
-                        {isBtw ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} /> : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />}
+                        {isBtw
+                            ? <ModelControls className="flex-1 min-w-0 justify-end" sessionId={modelSessionId ?? null} selection={btwSelection} />
+                            : activeBackend === 'acp'
+                                ? <AcpModelSelector sessionId={currentSessionId ?? null} className="flex-1 min-w-0 justify-end" />
+                                : <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />}
                         {!isBtw ? <MemoComposerDictation
                             radius={chatInputRadius}
                             isMobile={isMobile}

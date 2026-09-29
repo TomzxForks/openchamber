@@ -19,6 +19,7 @@ import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } fro
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
+import { getActiveAgentClient } from "@/lib/agent/active-client"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
@@ -300,7 +301,7 @@ export async function routeMessage(params: {
     directory: requestDirectory,
     files: sendFiles,
     appendSubmissions: params.appendSubmissions,
-    send: (messageID) => opencodeClient.sendMessage({
+    send: (messageID) => getActiveAgentClient().sendMessage({
       runtimeKey: params.runtimeKey,
       id: params.sessionId,
       providerID: params.providerID,

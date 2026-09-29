@@ -2180,6 +2180,8 @@ async function main(options = {}) {
     getOpenChamberEventClients: () => uiOpenChamberEventClients,
     writeSseEvent,
     permissionAutoAcceptRuntime,
+    globalMessageStreamHub,
+    setSessionStatus: (...args) => sessionRuntime.setSessionStatus(...args),
     messageQueueRuntime,
     routingRuntime,
   });
