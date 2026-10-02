@@ -9,9 +9,11 @@ import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
+import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { createArchiveStore } from './archive-store.js';
+import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
-import { createSessionMetadataStore, createUpstreamSessionMetadataReader } from './session-metadata-store.js';
+import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -392,7 +394,7 @@ export const createOpenChamberSessionService = (dependencies) => {
   const archiveStore = injectedArchiveStore || createArchiveStore({ dataDir });
   const sessionMetadataStore = injectedSessionMetadataStore || createSessionMetadataStore({
     dataDir,
-    readUpstreamMetadata: createUpstreamSessionMetadataReader({
+    openCode: createOpenCodeSessionMetadata({
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
       createOpenCodeClient,
@@ -587,8 +589,28 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw markGoalPartial(error);
     }
 
+    // A session the agent dispatched has no UI to attach the project's
+    // standing context, so it is asked for here. Never fails the dispatch:
+    // a session that runs without its background beats one that never runs.
+    const knowledge = sessionKnowledgeRuntime
+      ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
+        .catch(() => ({ text: '', signature: '' }))
+      : { text: '', signature: '' };
+    // After the send is accepted, so a rejected dispatch carries it again.
+    const recordKnowledge = async () => {
+      if (knowledge.text && sessionKnowledgeRuntime) {
+        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
+          .catch(() => undefined);
+      }
+    };
+
     if (resolvedCommand) {
       try {
+        // The command route takes no extra parts, so the context goes in
+        // first as a synthetic message that does not start execution.
+        if (knowledge.text) {
+          await client.session.synthetic({ sessionID, text: knowledge.text, resume: false });
+        }
         await client.session.command({
           sessionID,
           // OpenCode 2.0.8 renamed the command body field `command` to `name`.
@@ -598,15 +620,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch (error) {
         throw markGoalPartial(error);
       }
+      await recordKnowledge();
     } else {
-      // A session the agent dispatched has no UI to attach the project's
-      // standing context, so it is asked for here. Never fails the dispatch:
-      // a session that runs without its background beats one that never runs.
-      const knowledge = sessionKnowledgeRuntime
-        ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
-          .catch(() => ({ text: '', signature: '' }))
-        : { text: '', signature: '' };
-
       let landedMessageID = null;
       try {
         if (knowledge.text) {
@@ -626,11 +641,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       } catch (error) {
         throw markGoalPartial(error);
       }
-      if (knowledge.text && sessionKnowledgeRuntime) {
-        // After the prompt is accepted, so a rejected dispatch carries it again.
-        await sessionKnowledgeRuntime.recordDelivered(sessionID, directory, knowledge.signature)
-          .catch(() => undefined);
-      }
+      await recordKnowledge();
       if (!landedMessageID) {
         // v2 answers a prompt with the inbox item it recorded. No item id means
         // nothing is queued, so the dispatch must not be claimed as done.
@@ -656,15 +667,11 @@ export const createOpenChamberSessionService = (dependencies) => {
   };
 
   /**
-   * Merge-patch a session's OpenChamber-owned metadata.
-   *
-   * OpenCode 2.x only accepts metadata at create time, so this is where the
+   * Merge-patch a session's OpenChamber metadata on its OpenCode record: the
    * per-session state of goal mode, session assist, obligatory context and
-   * pinned notes lives. The broadcast carries the full merged object, because a
+   * pinned notes. The broadcast carries the full merged object, because a
    * client that missed an earlier patch must not have to reconstruct it.
    */
-  // Seeding a session OpenCode still holds metadata for (migrated from v1, or
-  // set at create time) is the store's own job, so every writer gets it.
   const writeMetadata = async (sessionID, patch, directory = '') => {
     if (typeof persistSessionMetadata === 'function') {
       return persistSessionMetadata(sessionID, patch, { directory });
@@ -884,6 +891,15 @@ export const createOpenChamberSessionService = (dependencies) => {
           messageID: asNonEmptyString(payload.messageId) || undefined,
         });
         targetSessionID = targetSession.id;
+        // Before the prompt goes out, so a goal armed by this dispatch writes
+        // over the copied objective rather than the other way round.
+        await applyForkInheritance({
+          sourceSessionID,
+          fork: targetSession,
+          readObjective,
+          writeObjective,
+          writeMetadata: (sessionID, patch) => writeMetadata(sessionID, patch, directory),
+        });
       }
 
       const baselineAssistantMessageId = await latestCompletedAssistantMessageID({
@@ -963,8 +979,23 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  // The control service's session reads resolve projectId through the same
+  // lookup as create/send/fork, so an unknown project or a missing project
+  // folder fails the same way everywhere.
+  const resolveDirectory = async (payload) => {
+    const resolved = await resolveRequestedDirectory({
+      payload,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolved.ok) throw new OpenChamberControlError(resolved.error, resolved.status || 400);
+    return resolved.directory;
+  };
+
   return {
     create,
+    resolveDirectory,
     archive,
     unarchive,
     archiveStore,

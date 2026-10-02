@@ -115,6 +115,7 @@ const createRuntime = (settings, options = {}) => {
     readSettingsFromDiskMigrated: async () => settings,
     spawnSync: options.spawnSync,
     homedir: options.homedir,
+    wellKnownOpencodePaths: options.wellKnownOpencodePaths,
     providedLoginShellEnvSnapshot: options.providedLoginShellEnvSnapshot,
   });
 
@@ -238,6 +239,32 @@ describe('OpenCode env runtime', () => {
     expect(runtime.getLoginShellEnvSnapshot()).toEqual({ PATH: '/from/host' });
     expect(state.cachedLoginShellEnvSnapshot).toEqual({ PATH: '/from/host' });
     expect(probes).toBe(0);
+  });
+
+  it('keeps shell startup output out of the login-shell snapshot', () => {
+    setPlatform('darwin');
+    const previousShell = process.env.SHELL;
+    const shell = path.join(createTempDir('openchamber-shell-'), 'zsh');
+    fs.writeFileSync(shell, '#!/bin/sh\n', { mode: 0o755 });
+    process.env.SHELL = shell;
+    try {
+      const { runtime, state } = createRuntime({}, {
+        // Stands in for a shell whose interactive rc file prints a banner to
+        // stdout before it runs the probe command: only the `echo` part of the
+        // command and `env -0` are emulated.
+        spawnSync: (_command, args) => {
+          const echoed = args[1].match(/^echo (\S+); /);
+          const stdout = `Welcome to test-host\n${echoed ? `${echoed[1]}\n` : ''}HOME=/home/test-user\0PATH=/shell/bin\0`;
+          return { status: 0, stdout, stderr: '' };
+        },
+      });
+      state.cachedLoginShellEnvSnapshot = undefined;
+
+      expect(runtime.getLoginShellEnvSnapshot()).toEqual({ HOME: '/home/test-user', PATH: '/shell/bin' });
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+    }
   });
 
   it('does not probe the shell when the host provided an empty snapshot', () => {
@@ -442,6 +469,10 @@ describe('OpenCode env runtime', () => {
     const shellCalls = [];
     const { runtime } = createRuntime({}, {
       homedir: () => createTempDir('openchamber-empty-home-'),
+      // This machine has a brew-installed opencode at one of the well-known
+      // absolute fallbacks; an empty list keeps the fall-through assertion
+      // about the probes themselves, not about what the developer installed.
+      wellKnownOpencodePaths: [],
       spawnSync: (command, args, options) => {
         shellCalls.push({ command, args, options });
         // What spawnSync reports when `timeout` fires: no status, an error.
@@ -454,6 +485,37 @@ describe('OpenCode env runtime', () => {
     for (const call of shellCalls) {
       expect(call.args).toContain('-lic');
       expect(call.options.timeout).toBe(5_000);
+    }
+  });
+
+  it('bounds every Windows startup probe and falls through when one overruns', () => {
+    setPlatform('win32');
+    process.env.LOCALAPPDATA = createTempDir('openchamber-localappdata-');
+    process.env.PATH = createTempDir('openchamber-empty-path-');
+    process.env.SystemRoot = createTempDir('openchamber-empty-systemroot-');
+    delete process.env.OPENCODE_BINARY;
+    const calls = [];
+    const { runtime, state } = createRuntime({}, {
+      homedir: () => createTempDir('openchamber-empty-home-'),
+      spawnSync: (command, args, options) => {
+        calls.push({ command, args, options });
+        return { status: null, signal: 'SIGTERM', error: new Error('spawnSync ETIMEDOUT'), stdout: '', stderr: '' };
+      },
+    });
+
+    // Not probed yet, so the PowerShell and cmd snapshot probes run too.
+    state.cachedLoginShellEnvSnapshot = undefined;
+    expect(runtime.getLoginShellEnvSnapshot()).toBeNull();
+    expect(runtime.resolveOpencodeCliPath()).toBeNull();
+    expect(calls.some((call) => call.command === 'where')).toBe(true);
+    for (const call of calls) {
+      expect(call.options.timeout).toBe(10_000);
+    }
+    const powershellCalls = calls.filter((call) => call.args.includes('-Command'));
+    expect(powershellCalls.length).toBeGreaterThan(0);
+    for (const call of powershellCalls) {
+      expect(call.args).toContain('-NoProfile');
+      expect(call.args).toContain('-NonInteractive');
     }
   });
 

@@ -58,21 +58,19 @@ export interface DraftTargetProps {
     selectedDirectory: string | null;
     selectedBranchLabel: string | null;
     selectedBranchIsKnown: boolean;
+    /** Shows the warning icon; its explanation opens on hover only. */
     hasUncommittedChanges: boolean;
-    /**
-     * Whether the dirty warning may announce itself by opening its tooltip
-     * unprompted. Off for a draft the app opened on its own at boot: that
-     * draft is often only a placeholder until the last session restores, and
-     * a tooltip on an otherwise empty screen reads as a glitch. The warning
-     * icon still shows on desktop and the tooltip stays reachable by hover.
-     */
-    announceDirtyState: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
     onDirectoryChange: (directory: string) => void;
+    /**
+     * Opens the create dialog of an isolated space; absent where the entry is not offered: while
+     * the feature's switch is off, and always in VS Code (decision 16 of the design).
+     */
+    onCreateSpace?: () => void;
     theme: Theme;
 }
 
@@ -115,33 +113,8 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 }
 
 /** Desktop: inline project and branch selects. */
-/** How long the dirty-directory tooltip announces itself before becoming hover-only. */
-const DIRTY_TOOLTIP_FLASH_MS = 5000;
-
-/**
- * Opens the tooltip for a few seconds when the dirty state first appears, so
- * the warning is seen without hovering, then hands control back to hover.
- * Only when the draft may announce itself — see `announceDirtyState`.
- */
-function useDirtyFlashTooltip(hasUncommittedChanges: boolean, announce: boolean) {
-    const [open, setOpen] = React.useState(false);
-
-    React.useEffect(() => {
-        if (!hasUncommittedChanges || !announce) {
-            setOpen(false);
-            return;
-        }
-        setOpen(true);
-        const timer = window.setTimeout(() => setOpen(false), DIRTY_TOOLTIP_FLASH_MS);
-        return () => window.clearTimeout(timer);
-    }, [announce, hasUncommittedChanges]);
-
-    return { open, onOpenChange: setOpen };
-}
-
 export function DraftTargetSelectors(props: DraftTargetProps) {
     const { t } = useI18n();
-    const dirtyTooltip = useDirtyFlashTooltip(props.hasUncommittedChanges, props.announceDirtyState);
     const {
         projects,
         selectedProject,
@@ -155,6 +128,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
         showBranchSelector,
         onProjectChange,
         onDirectoryChange,
+        onCreateSpace,
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
@@ -415,7 +389,7 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                     onValueChange={handleDirectoryChange}
                     disableGlobalShortcuts
                 >
-                    <Tooltip open={dirtyTooltip.open} onOpenChange={dirtyTooltip.onOpenChange}>
+                    <Tooltip>
                         <TooltipTrigger asChild>
                             <SelectTrigger
                                 ref={worktreeTriggerRef}
@@ -473,6 +447,21 @@ export function DraftTargetSelectors(props: DraftTargetProps) {
                             <SelectItem value={selectedDirectory} showSelectedBackground={false} className="max-w-[24rem] truncate">
                                 {selectedBranchLabel}
                             </SelectItem>
+                        ) : null}
+                        {onCreateSpace ? (
+                            <>
+                                <SelectSeparator />
+                                <div className="px-2 py-1.5">
+                                    <button
+                                        type="button"
+                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                        onPointerDown={(e) => { e.stopPropagation(); }}
+                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                    >
+                                        {t('spaces.picker.new')}
+                                    </button>
+                                </div>
+                            </>
                         ) : null}
                     </SelectContent>
                 </Select>
@@ -604,6 +593,7 @@ export function MobileDraftTargetSheets(
         branchItems,
         onProjectChange,
         onDirectoryChange,
+        onCreateSpace,
         openPicker,
         onOpenPickerChange,
         theme,
@@ -691,6 +681,20 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    {onCreateSpace ? (
+                                        <div className="px-2 pb-1 pt-2">
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={() => {
+                                                    onOpenPickerChange(null);
+                                                    onCreateSpace();
+                                                }}
+                                            >
+                                                {t('spaces.picker.new')}
+                                            </button>
+                                        </div>
+                                    ) : null}
                                 </>
                             );
                         })()}
