@@ -10,6 +10,14 @@ mock.module('vscode', () => ({
   },
 }));
 
+// Point the user-level OpenCode config at a scratch directory BEFORE importing:
+// the bridge writes agents, commands and plugins there, and a built-in agent
+// such as `build` is materialised as a user-level file. Nothing here may touch
+// the real ~/.config/opencode.
+const scratchConfigRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-bridge-config-'));
+process.env.XDG_CONFIG_HOME = path.join(scratchConfigRoot, 'xdg');
+process.env.OPENCODE_CONFIG_DIR = '';
+
 const { handleConfigBridgeMessage } = await import('./bridge-config-runtime.ts');
 
 const tempRoots = [];
@@ -52,6 +60,25 @@ afterEach(() => {
 const readJson = (filePath) => JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
 describe('VS Code config bridge plugin parity', () => {
+  test('explicit config reload restarts OpenCode', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-reload-'));
+    tempRoots.push(root);
+    const ctx = createCtx(root);
+
+    const reloaded = await handleConfigBridgeMessage({
+      id: 'reload',
+      type: 'api:config/reload',
+    }, ctx, deps);
+
+    expect(reloaded).toEqual({
+      id: 'reload',
+      type: 'api:config/reload',
+      success: true,
+      data: { restarted: true },
+    });
+    expect(ctx.restart).toHaveBeenCalledTimes(1);
+  });
+
   test('removes agent fields when update payload sends null', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-agent-null-'));
     tempRoots.push(root);
@@ -82,7 +109,12 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
 
     expect(updated?.success).toBe(true);
-    expect(readJson(configPath).agent.build).toEqual({ mode: 'subagent' });
+    // The v1 `agent` entry is rewritten in place as a v2 `agents` entry, and the
+    // cleared v1 fields are removed from where v2 keeps them: `variant` off the
+    // model reference, `temperature`/`top_p` out of `request.body`.
+    const agentConfig = readJson(configPath);
+    expect(agentConfig.agent).toBeUndefined();
+    expect(agentConfig.agents.build).toEqual({ mode: 'subagent' });
   });
 
   test('creates, lists, updates, and deletes project plugin entries', async () => {
@@ -102,7 +134,11 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(ctx.restart).toHaveBeenCalledTimes(1);
+    expect(created?.data).toMatchObject({
+      success: true,
+      message: 'Plugin entry changed.',
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
 
     const listed = await handleConfigBridgeMessage({
       id: 'list',
@@ -127,7 +163,8 @@ describe('VS Code config bridge plugin parity', () => {
     expect(updated?.success).toBe(true);
 
     const config = JSON.parse(fs.readFileSync(path.join(root, '.opencode', 'opencode.json'), 'utf8'));
-    expect(config.plugin).toEqual([['plugin-b', { enabled: true }]]);
+    expect(config.plugin).toBeUndefined();
+    expect(config.plugins).toEqual([{ package: 'plugin-b', options: { enabled: true } }]);
 
     const relisted = await handleConfigBridgeMessage({
       id: 'relist',
@@ -208,7 +245,9 @@ describe('VS Code config bridge plugin parity', () => {
       },
     }, ctx, deps);
     expect(updated?.success).toBe(true);
-    expect(readJson(configPath).plugin).toEqual(['custom-plugin-next']);
+    // Touching one entry migrates the whole v1 `plugin` array into v2 `plugins`.
+    expect(readJson(configPath).plugin).toBeUndefined();
+    expect(readJson(configPath).plugins).toEqual(['custom-plugin-next']);
 
     const relisted = await handleConfigBridgeMessage({
       id: 'relist-custom',
@@ -224,6 +263,7 @@ describe('VS Code config bridge plugin parity', () => {
     }, ctx, deps);
     expect(deleted?.success).toBe(true);
     expect(readJson(configPath).plugin).toBeUndefined();
+    expect(readJson(configPath).plugins).toBeUndefined();
   });
 
   test('writes user plugin files next to OPENCODE_CONFIG', async () => {
@@ -251,27 +291,43 @@ describe('VS Code config bridge plugin parity', () => {
     expect(fs.readFileSync(path.join(configDir, 'plugins', 'demo-plugin.ts'), 'utf8')).toBe('export default {}');
   });
 
-  test('reports plugin mutation success when restart fails after writing config', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-restart-'));
+  // OpenCode 2 watches its config sources, so a write is live as soon as it
+  // lands: there is no restart to defer and no restart that can fail. The
+  // mutation just reports where it wrote.
+  test('creates an MCP server under mcp.servers without restarting OpenCode', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-mcp-create-'));
     tempRoots.push(root);
     const ctx = createCtx(root, async () => {
       throw new Error('restart failed');
     });
+    const configPath = path.join(root, '.opencode', 'opencode.json');
 
     const created = await handleConfigBridgeMessage({
-      id: 'create-restart-failure',
-      type: 'api:config/plugins',
+      id: 'create-mcp',
+      type: 'api:config/mcp',
       payload: {
         method: 'POST',
-        target: 'entry',
+        name: 'mcp-server',
         directory: root,
-        body: { scope: 'project', spec: 'plugin-restart' },
+        body: { scope: 'project', type: 'local', command: ['node', 'server.js'], enabled: false },
       },
     }, ctx, deps);
 
     expect(created?.success).toBe(true);
-    expect(created?.data).toMatchObject({ success: true, requiresReload: false, reloadFailed: true });
-    expect(created?.data?.warning).toContain('restart failed');
-    expect(readJson(path.join(root, '.opencode', 'opencode.json')).plugin).toEqual(['plugin-restart']);
+    expect(created?.data).toMatchObject({
+      success: true,
+      message: 'MCP server "mcp-server" created.',
+      path: configPath,
+    });
+    expect(ctx.restart).not.toHaveBeenCalled();
+
+    const written = readJson(configPath);
+    expect(written.mcp['mcp-server']).toBeUndefined();
+    expect(written.mcp.servers['mcp-server']).toEqual({
+      type: 'local',
+      command: ['node', 'server.js'],
+      // v1 `enabled: false` becomes the inverse v2 `disabled: true`.
+      disabled: true,
+    });
   });
 });

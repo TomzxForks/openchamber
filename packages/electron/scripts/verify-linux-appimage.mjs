@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeTargetArchitecture } from './target-architecture.mjs';
+import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -13,7 +14,7 @@ const ELF_MACHINE = { x64: 62, arm64: 183 };
 // sherpa-onnx-node loads this Node-API addon from its platform-specific prebuilt
 // package in the separate server worker, so verify its architecture here rather
 // than Electron-rebuilding it with the source-built modules.
-const REQUIRED_NATIVE_MODULES = ['better_sqlite3.node', 'pty.node', 'sherpa-onnx.node'];
+const REQUIRED_NATIVE_MODULES = ['pty.node', 'sherpa-onnx.node'];
 
 /** electron-builder AppImage arch token: x64 → x86_64, arm64 → arm64 */
 export const linuxAppImageArchSuffix = (architecture) => (
@@ -71,7 +72,7 @@ const defaultCliVersion = (binaryPath) => {
     timeout: 15000,
   });
   if (result.status !== 0) throw new Error(`Failed to run packaged OpenCode CLI: ${binaryPath}`);
-  return (result.stdout || '').trim().split(/\s+/)[0] || '';
+  return parseOpenCodeCliVersion(result.stdout);
 };
 
 export const verifyExtractedPayload = ({
@@ -145,7 +146,7 @@ const main = () => {
     const result = verifyExtractedPayload({
       root: extractAppImage(appImagePath, temporaryDirectory),
       targetArchitecture: target,
-      expectedOpenCodeVersion: rootPackage.dependencies?.['@opencode-ai/sdk'],
+      expectedOpenCodeVersion: readPinnedOpenCodeCliVersion(),
     });
     console.log(`[electron] verified Linux ${target} AppImage: ${appImagePath}`);
     console.log(`[electron] verified OpenCode CLI ${result.openCodeVersion} and ${result.nativeModuleCount} native modules`);

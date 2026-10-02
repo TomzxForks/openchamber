@@ -1,99 +1,114 @@
 import React from 'react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { DiffViewIcon } from '@/components/icons/DiffIcon';
 import { Button } from '@/components/ui/button';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { DiffView } from '@/components/views/DiffView';
-import { FilesView } from '@/components/views/FilesView';
-import { GitView } from '@/components/views/GitView';
 import { PullRequestView } from '@/components/views/PullRequestView';
 import { TerminalView } from '@/components/views/TerminalView';
-import { PlanView } from '@/components/views/PlanView';
+import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+
+// Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
+// or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
+// into the eager startup graph even when no such tab is open.
+const WalkthroughView = lazyWithChunkRecovery(() => import('@/components/views/walkthrough/WalkthroughView').then((m) => ({ default: m.WalkthroughView })));
+const DiffView = lazyWithChunkRecovery(() => import('@/components/views/DiffView').then((m) => ({ default: m.DiffView })));
+const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesView').then((m) => ({ default: m.FilesView })));
+const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
+// The Linear rail icon stays hidden until a workspace is connected, so most
+// users never render this panel; keep it out of the main bundle.
+const LinearIssuesView = lazyWithChunkRecovery(() => import('@/components/views/LinearIssuesView').then((m) => ({ default: m.LinearIssuesView })));
+const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { openExternalUrl } from '@/lib/url';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
-import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useInputStore } from '@/sync/input-store';
+import { clampContextEditorTreeWidth, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
-import { toast } from '@/components/ui';
-import { runtimeFetch } from '@/lib/runtime-fetch';
-import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
+import { BrowserPane } from '@/components/browser/BrowserPane';
+import { browserUrlLabel } from '@/lib/browser/url';
+import { registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
+import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
-import { OpenChamberLogo } from "@/components/ui/OpenChamberLogo";
-import { invokeDesktopCommand } from '@/lib/desktopNative';
-import { getOrCreateEmbeddedSessionChatURL, type EmbeddedSessionChatURLCacheEntry } from './contextPanelEmbeddedChat';
-import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { GuestIcon } from './GuestRailIcon';
 import {
-  type PreviewElementMetadata,
-  isPreviewElementMetadata,
-  formatPreviewAnnotationMarkdown,
-  renderPreviewScreenshot,
-  desktopAnnotationToFile,
-  getCachedProxyTarget,
-  getBrowserProxyTargetKey,
-  previewProxyTargetCache,
-} from '@/lib/preview/screenshot-capture';
+  EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
+  EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+  EMBEDDED_VISIBILITY_REQUEST,
+  EMBEDDED_VISIBILITY_UPDATE,
+  getActiveEmbeddedSessionChatTab,
+  getOrCreateEmbeddedSessionChatURL,
+  type EmbeddedSessionChatURLCacheEntry,
+  type EmbeddedSessionRuntimeBootstrap,
+} from './contextPanelEmbeddedChat';
+const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
+// How an extension page sits beside its shared surface: flex direction puts
+// the page first on top/left and last on bottom/right; the page's size is
+// fixed across the docked edge and the picture takes the rest.
+const DOCK_LAYOUT = {
+  top: { container: 'flex-col', page: 'border-b border-border', vertical: true },
+  bottom: { container: 'flex-col-reverse', page: 'border-t border-border', vertical: true },
+  left: { container: 'flex-row', page: 'border-r border-border', vertical: false },
+  right: { container: 'flex-row-reverse', page: 'border-l border-border', vertical: false },
+} as const;
 
-const CONTEXT_PANEL_MIN_WIDTH = 380;
-const CONTEXT_PANEL_MAX_WIDTH = 1400;
+/**
+ * A shared-surface extension's own page, docked to one edge of the picture.
+ * It starts at the manifest's `panel.size` and follows the page's
+ * `host.setHeight` after that (the thickness across its edge, so a width
+ * for a left or right dock), never below the manifest minimum and never past
+ * half the panel, so the picture always stays in view.
+ */
+const DockedGuestPage: React.FC<{ mode: PluginContextPanelMode; docking: GuestSurfaceDocking }> = ({ mode, docking }) => {
+  const [requested, setRequested] = React.useState<number | null>(null);
+  const layout = DOCK_LAYOUT[docking.dock];
+  const size = Math.max(GUEST_SURFACE_DOCK_SIZE_MIN, requested ?? docking.size);
+  return (
+    <div
+      className={cn(
+        'shrink-0 overflow-hidden duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+        layout.vertical ? 'max-h-[50%] transition-[height]' : 'max-w-[50%] transition-[width]',
+        layout.page,
+      )}
+      style={layout.vertical ? { height: size } : { width: size }}
+    >
+      <PluginPane mode={mode} onResize={setRequested} />
+    </div>
+  );
+};
+
+const GuestSurfacePane = React.lazy(() => import('./GuestSurfacePane').then((module) => ({ default: module.GuestSurfacePane })));
+import { useGuestsStore } from '@/lib/guests/store';
+import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
+import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
+import { GUEST_SURFACE_DOCK_SIZE_MIN } from '@openchamber/sdk';
+import { isPluginContextPanelMode, pluginIdFromMode, type PluginContextPanelMode } from '@/lib/surfaces/modes';
+import { getContextSurfaceWidthFraction } from '@/lib/surfaces/registry';
+import { isEditorEventTarget } from '@/lib/editorFocus';
+import { isTerminalEventTarget } from '@/lib/terminalFocus';
+
+const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
+// The panel has no absolute pixel ceiling: on large monitors the user may
+// want it nearly full-width (side-by-side diffs with the chat open). The
+// only limit during a drag is leaving the chat column this much width.
+const CONTEXT_CHAT_MIN_WIDTH = 400;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
-type PreviewConsoleEvent = {
-  id: number;
-  level: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'resource' | 'runtime';
-  message: string;
-  details?: string;
-  ts: number;
-};
-
-type PreviewConsoleFilter = 'all' | 'errors' | 'warnings' | 'logs';
-
-type PreviewBridgeMessage = {
-  source?: string;
-  version?: number;
-  type?: string;
-  level?: PreviewConsoleEvent['level'];
-  args?: unknown[];
-  message?: unknown;
-  stack?: unknown;
-  filename?: unknown;
-  line?: unknown;
-  column?: unknown;
-  tag?: unknown;
-  url?: unknown;
-  outerHTML?: unknown;
-  title?: unknown;
-  ts?: unknown;
-  target?: unknown;
-  navigation?: unknown;
-};
-
-
-const PREVIEW_CONSOLE_EVENT_LIMIT = 200;
-
-const getPreviewConsoleFilterMatch = (event: PreviewConsoleEvent, filter: PreviewConsoleFilter): boolean => {
-  if (filter === 'all') return true;
-  if (filter === 'errors') return event.level === 'error' || event.level === 'runtime' || event.level === 'resource';
-  if (filter === 'warnings') return event.level === 'warn';
-  return event.level === 'log' || event.level === 'info' || event.level === 'debug';
-};
 
 
 const normalizeDirectoryKey = (value: string): string => {
@@ -115,12 +130,20 @@ const normalizeDirectoryKey = (value: string): string => {
   return normalized;
 };
 
-const clampWidth = (width: number): number => {
+const clampWidth = (width: number, maxWidth: number): number => {
   if (!Number.isFinite(width)) {
     return CONTEXT_PANEL_DEFAULT_WIDTH;
   }
 
-  return Math.min(CONTEXT_PANEL_MAX_WIDTH, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
+  return Math.min(maxWidth, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
+};
+
+// Ceiling derived from the space the panel actually shares with the chat:
+// everything except a minimum chat column, never below the panel minimum.
+const maxPanelWidth = (availableWidth?: number | null): number => {
+  const base = availableWidth
+    ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
+  return Math.max(CONTEXT_PANEL_MIN_WIDTH, base - CONTEXT_CHAT_MIN_WIDTH);
 };
 
 const getAvailablePanelWidth = (panel: HTMLElement | null): number | null => {
@@ -151,13 +174,18 @@ const getModeLabel = (
   if (mode === 'chat') return t('contextPanel.mode.chat');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
+  if (mode === 'walkthrough') return t('contextPanel.mode.walkthrough');
   if (mode === 'plan') return t('contextPanel.mode.plan');
-  if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
+  if (mode === 'linear') return t('contextPanel.mode.linear');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
+  if (isPluginContextPanelMode(mode)) {
+    const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
+    return guest?.name ?? t('contextRail.surface.plugin');
+  }
   return t('contextPanel.mode.context');
 };
 
@@ -201,25 +229,20 @@ const getTabLabel = (
     return t('contextPanel.mode.chat');
   }
 
+  // Ahead of the stored label on purpose: a browser tab is named after the page
+  // it is showing, and the stored label is only ever the address it opened at.
+  // Keeping that would leave the tab claiming one host while the address bar
+  // shows another.
+  if (tab.mode === 'browser') {
+    return browserUrlLabel(tab.targetPath ?? '') || tab.label || t('contextPanel.mode.browser');
+  }
+
   if (tab.label) {
     return tab.label;
   }
 
   if (tab.mode === 'file') {
     return getFileNameFromPath(tab.targetPath) || t('contextPanel.mode.files');
-  }
-
-  if (tab.mode === 'preview') {
-    const url = tab.targetPath;
-    if (url) {
-      try {
-        const parsed = new URL(url);
-        return parsed.host || parsed.hostname || t('contextPanel.mode.preview');
-      } catch {
-        // ignore invalid URL
-      }
-    }
-    return t('contextPanel.mode.preview');
   }
 
   if (tab.mode === 'diff') {
@@ -229,7 +252,16 @@ const getTabLabel = (
   return getModeLabel(tab.mode, t);
 };
 
-const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
+const ContextGuestIcon: React.FC<{ mode: ContextPanelMode }> = ({ mode }) => {
+  const surfaces = useGuestSurfaces();
+  const surface = surfaces.find((entry) => entry.mode === mode);
+  return <GuestIcon icon={surface?.icon ?? FALLBACK_GUEST_ICON} iconSrc={surface?.iconSrc} className="h-3.5 w-3.5" />;
+};
+
+const getTabIcon = (
+  tab: { mode: ContextPanelMode; targetPath: string | null },
+  faviconByOrigin: Record<string, string> = {},
+): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -237,7 +269,11 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
 
   if (tab.mode === 'diff') {
-    return <Icon name="arrow-left-right" className="h-3.5 w-3.5" />;
+    return <DiffViewIcon className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'walkthrough') {
+    return <Icon name="route" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'git') {
@@ -245,7 +281,11 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
 
   if (tab.mode === 'pr') {
-    return <Icon name="git-pull-request" className="h-3.5 w-3.5" />;
+    return <Icon name="github" className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'linear') {
+    return <Icon name="linear" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {
@@ -268,23 +308,34 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
     return <Icon name="chat-4" className="h-3.5 w-3.5" />;
   }
 
-  if (tab.mode === 'preview') {
-    return <Icon name="global" className="h-3.5 w-3.5 text-[var(--status-info)]" />;
+  if (isPluginContextPanelMode(tab.mode)) {
+    return <ContextGuestIcon mode={tab.mode} />;
   }
 
   if (tab.mode === 'browser') {
-    return <Icon name="global" className="h-3.5 w-3.5" />;
+    const icon = browserFaviconFor(tab.targetPath ?? '', faviconByOrigin);
+    // The page's own icon when it has reported one; the placeholder otherwise,
+    // including in runtimes where a page never can.
+    return icon
+      ? <img src={icon} alt="" aria-hidden="true" className="h-3.5 w-3.5 rounded-[3px] object-contain" />
+      : <Icon name="global" className="h-3.5 w-3.5" />;
   }
 
   return undefined;
 };
 
-const EDITOR_TREE_MIN_WIDTH = 200;
-const EDITOR_TREE_MAX_WIDTH = 480;
+const browserFaviconFor = (url: string, faviconByOrigin: Record<string, string>): string => {
+  try {
+    return faviconByOrigin[new URL(url).origin] ?? '';
+  } catch {
+    return '';
+  }
+};
 
 // The editor surface's file-tree column: docked on the right, resizable from
-// its left edge, and animated open/closed like the app sidebars.
-const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
+// its left edge, and animated open/closed like the app sidebars. In tree-only
+// mode (`fill`), the panel collapses around this fixed-width, right-aligned column.
+const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean }> = ({ visible, active, fill = false }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -294,10 +345,6 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
   const liveWidthRef = React.useRef<number | null>(null);
   const pointerIDRef = React.useRef<number | null>(null);
   const columnRef = React.useRef<HTMLDivElement | null>(null);
-
-  const clampTreeWidth = React.useCallback((value: number) => {
-    return Math.min(EDITOR_TREE_MAX_WIDTH, Math.max(EDITOR_TREE_MIN_WIDTH, Math.round(value)));
-  }, []);
 
   const applyLiveTreeWidth = React.useCallback((nextWidth: number) => {
     const column = columnRef.current;
@@ -330,7 +377,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       return;
     }
     const delta = startXRef.current - event.clientX;
-    const nextWidth = clampTreeWidth(startWidthRef.current + delta);
+    const nextWidth = clampContextEditorTreeWidth(startWidthRef.current + delta);
     if (liveWidthRef.current === nextWidth) {
       return;
     }
@@ -347,7 +394,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
     } catch {
       // ignore
     }
-    const finalWidth = clampTreeWidth(liveWidthRef.current ?? width);
+    const finalWidth = clampContextEditorTreeWidth(liveWidthRef.current ?? width);
     pointerIDRef.current = null;
     liveWidthRef.current = null;
     setIsResizing(false);
@@ -360,11 +407,12 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
     <div
       ref={columnRef}
       className={cn(
-        'relative h-full flex-shrink-0 overflow-hidden border-l border-border/40 bg-background will-change-[width] motion-reduce:transition-none',
-        !visible && 'border-l-0',
+        'relative h-full flex-shrink-0 overflow-hidden bg-background will-change-[width] motion-reduce:transition-none',
+        fill && 'ml-auto',
       )}
       style={{
         width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
+        maxWidth: fill ? '100%' : undefined,
         ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
         overflowX: 'clip',
         transitionProperty: isResizing ? 'none' : 'width',
@@ -373,7 +421,11 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       }}
       aria-hidden={!visible}
     >
-      {visible && (
+      {/* Paint the divider without shifting tree content when the editor closes. */}
+      {visible && !fill && (
+        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 z-20 w-px bg-border" />
+      )}
+      {visible && !fill && (
         <div
           className={cn(
             'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
@@ -394,10 +446,10 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
           isResizing && 'pointer-events-none',
           !visible && 'pointer-events-none select-none opacity-0'
         )}
-        style={{ width: 'var(--oc-editor-tree-width)' }}
+        style={{ width: 'var(--oc-editor-tree-width)', maxWidth: fill ? '100%' : undefined }}
         aria-hidden={!visible}
       >
-        <SidebarFilesTree />
+        <SidebarFilesTree visible={visible && active} />
       </div>
     </div>
   );
@@ -453,158 +505,6 @@ const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly 
   );
 };
 
-const DESKTOP_BROWSER_INSPECT_SCRIPT = `new Promise((resolve) => {
-  const existing = document.getElementById('__openchamber_desktop_browser_overlay');
-  if (existing) existing.remove();
-  if (typeof window.__openchamberDesktopBrowserCancelInspect === 'function') {
-    try { window.__openchamberDesktopBrowserCancelInspect(); } catch { /* webview not ready */ }
-  }
-  const overlay = document.createElement('div');
-  overlay.id = '__openchamber_desktop_browser_overlay';
-  overlay.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #60a5fa;background:rgba(96,165,250,.24);border-radius:3px;display:none;box-sizing:border-box;';
-  document.documentElement.appendChild(overlay);
-  const cssEscape = (value) => {
-    try { return CSS.escape(value); } catch { return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\\\$&'); }
-  };
-  const selectorPart = (element) => {
-    const tag = element.tagName.toLowerCase();
-    if (element.id) return tag + '#' + cssEscape(element.id);
-    const className = String(element.className || '').trim().split(/\\s+/).filter(Boolean).slice(0, 3).map((part) => '.' + cssEscape(part)).join('');
-    return tag + className;
-  };
-  const metadata = (element) => {
-    const rect = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    const ancestry = [];
-    let current = element;
-    while (current && current.nodeType === Node.ELEMENT_NODE && ancestry.length < 8) {
-      ancestry.unshift({ tag: current.tagName.toLowerCase(), id: current.id || undefined, className: typeof current.className === 'string' ? current.className : undefined, selectorPart: selectorPart(current) });
-      current = current.parentElement;
-    }
-    const attrs = {};
-    for (const attr of Array.from(element.attributes || []).slice(0, 16)) attrs[attr.name] = attr.value.slice(0, 300);
-    const path = ancestry.map((entry) => entry.selectorPart).join(' > ');
-    return {
-      frame: 'top',
-      tag: element.tagName.toLowerCase(),
-      text: String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 500),
-      selector: element.id ? '#' + cssEscape(element.id) : path,
-      path,
-      bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      center: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
-      attributes: attrs,
-      computedStyle: { display: style.display, position: style.position, fontWeight: style.fontWeight, fontSize: style.fontSize, lineHeight: style.lineHeight, fontFamily: style.fontFamily, color: style.color, backgroundColor: style.backgroundColor, zIndex: style.zIndex },
-      ancestry,
-    };
-  };
-  const move = (event) => {
-    const element = document.elementFromPoint(event.clientX, event.clientY);
-    if (!element || element === overlay || element === document.documentElement || element === document.body) return;
-    const rect = element.getBoundingClientRect();
-    overlay.style.display = 'block';
-    overlay.style.left = rect.left + 'px';
-    overlay.style.top = rect.top + 'px';
-    overlay.style.width = rect.width + 'px';
-    overlay.style.height = rect.height + 'px';
-  };
-  const cleanup = () => {
-    window.removeEventListener('mousemove', move, true);
-    window.removeEventListener('click', click, true);
-    window.removeEventListener('keydown', keydown, true);
-    if (window.__openchamberDesktopBrowserCancelInspect === cancel) {
-      delete window.__openchamberDesktopBrowserCancelInspect;
-    }
-  };
-  const cancel = () => {
-    cleanup();
-    overlay.remove();
-    resolve(null);
-  };
-  const click = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const element = document.elementFromPoint(event.clientX, event.clientY);
-    const result = element ? metadata(element) : null;
-    cleanup();
-    overlay.remove();
-    resolve(result);
-  };
-  const keydown = (event) => {
-    if (event.key !== 'Escape') return;
-    cancel();
-  };
-  window.__openchamberDesktopBrowserCancelInspect = cancel;
-  window.addEventListener('mousemove', move, true);
-  window.addEventListener('click', click, true);
-  window.addEventListener('keydown', keydown, true);
-});`;
-
-const DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT = `(() => {
-  if (typeof window.__openchamberDesktopBrowserCancelInspect === 'function') {
-    window.__openchamberDesktopBrowserCancelInspect();
-    return;
-  }
-  const overlay = document.getElementById('__openchamber_desktop_browser_overlay');
-  if (overlay) overlay.remove();
-})()`;
-
-const DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT = `(() => {
-  if (window.__openchamberSameWebviewNavigationInstalled) return;
-  window.__openchamberSameWebviewNavigationInstalled = true;
-
-  const navigate = (rawUrl) => {
-    if (typeof rawUrl !== 'string' || rawUrl.length === 0) return false;
-    try {
-      const url = new URL(rawUrl, window.location.href);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-      window.location.assign(url.href);
-      return true;
-    } catch (_error) {
-      return false;
-    }
-  };
-
-  const originalOpen = window.open.bind(window);
-  window.open = (url, target, features) => {
-    if (navigate(url)) return null;
-    return originalOpen(url, target, features);
-  };
-
-  document.addEventListener('click', (event) => {
-    if (event.defaultPrevented) return;
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const anchor = target.closest('a[target="_blank"][href]');
-    if (!(anchor instanceof HTMLAnchorElement)) return;
-    if (!navigate(anchor.href)) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }, true);
-})()`;
-
-const normalizeBrowserUrl = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) return 'about:blank';
-  try {
-    const parsed = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'about:blank';
-    return parsed.toString();
-  } catch {
-    return 'about:blank';
-  }
-};
-
-const runIframeScript = async <T,>(iframe: HTMLIFrameElement, script: string): Promise<T> => {
-  const frameWindow = iframe.contentWindow;
-  if (!frameWindow) {
-    throw new Error('Iframe window is not available');
-  }
-
-  const evaluate = (frameWindow as Window & { eval: (code: string) => unknown }).eval;
-  const result = evaluate.call(frameWindow, script) as unknown;
-  return await Promise.resolve(result) as T;
-};
-
 
 const truncateTabLabel = (value: string, maxChars: number): string => {
   if (value.length <= maxChars) {
@@ -614,1608 +514,6 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
   return `${value.slice(0, maxChars - 3)}...`;
 };
 
-type PreviewPaneProps = {
-  rawUrl: string;
-  onNavigate: (url: string) => void;
-};
-
-type PreviewProxyState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; proxyBasePath: string; previewToken?: string; expiresAt: number }
-  | { status: 'error'; message: string };
-
-const getPreviewProxyOrigin = (proxySrc: string): string => {
-  if (typeof window === 'undefined') return '';
-  try {
-    return new URL(proxySrc || window.location.href, window.location.href).origin;
-  } catch {
-    return window.location.origin;
-  }
-};
-
-const postPreviewBridgeMessage = (frameWindow: Window, proxySrc: string, payload: Record<string, unknown>): void => {
-  const targetOrigin = getPreviewProxyOrigin(proxySrc);
-  frameWindow.postMessage(payload, targetOrigin);
-};
-
-const stripPreviewTokenFromUrl = (value: string): string => {
-  if (!value) return value;
-  try {
-    const parsed = new URL(value);
-    parsed.searchParams.delete('oc_preview_token');
-    parsed.searchParams.delete('oc_client_token');
-    parsed.searchParams.delete('oc_url_token');
-    return parsed.toString();
-  } catch {
-    return value;
-  }
-};
-
-const stripPreviewQueryParams = (value: string): string => {
-  if (!value) return value;
-  try {
-    const parsed = new URL(value);
-    parsed.searchParams.delete('ocPreview');
-    parsed.searchParams.delete('oc_preview_token');
-    parsed.searchParams.delete('oc_client_token');
-    parsed.searchParams.delete('oc_url_token');
-    return parsed.toString();
-  } catch {
-    return value;
-  }
-};
-
-const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
-  const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
-  const [reloadNonce, bumpReload] = React.useReducer((x: number) => x + 1, 0);
-  const [proxyRegistrationNonce, bumpProxyRegistration] = React.useReducer((x: number) => x + 1, 0);
-  const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
-  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
-  const nextConsoleEventIdRef = React.useRef(1);
-  const [bridgeReady, setBridgeReady] = React.useState(false);
-  const [consoleOpen, setConsoleOpen] = React.useState(false);
-  const [consoleFilter, setConsoleFilter] = React.useState<PreviewConsoleFilter>('all');
-  const [consoleEvents, setConsoleEvents] = React.useState<PreviewConsoleEvent[]>([]);
-  const [inspectMode, setInspectMode] = React.useState(false);
-  const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
-  const effectiveDirectory = useEffectiveDirectory();
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
-
-  let parsedUrl: URL | null = null;
-  try {
-    parsedUrl = rawUrl ? new URL(rawUrl) : null;
-  } catch {
-    parsedUrl = null;
-  }
-
-  const isLoopback = parsedUrl
-    ? (parsedUrl.hostname === 'localhost'
-        || parsedUrl.hostname === '127.0.0.1'
-        || parsedUrl.hostname === '::1'
-        || parsedUrl.hostname === '[::1]'
-        || parsedUrl.hostname === '0.0.0.0')
-    : false;
-
-  const normalizedUrl = parsedUrl
-    ? (parsedUrl.hostname === '0.0.0.0'
-        ? new URL(parsedUrl.toString().replace('0.0.0.0', '127.0.0.1'))
-        : parsedUrl)
-    : null;
-
-  const targetKey = normalizedUrl ? normalizedUrl.toString() : '';
-  const proxyCacheKey = targetKey ? `${getRuntimeApiBaseUrl() || 'same-origin'}|${targetKey}` : '';
-  const previewColorScheme = currentTheme.metadata.variant;
-
-  React.useEffect(() => {
-    if (!targetKey || !isLoopback) {
-      setProxyState({ status: 'idle' });
-      return;
-    }
-
-    const cached = getCachedProxyTarget(proxyCacheKey);
-    if (cached?.previewToken) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
-      return;
-    }
-    if (cached) {
-      previewProxyTargetCache.delete(proxyCacheKey);
-    }
-
-    let cancelled = false;
-    setProxyState({ status: 'loading' });
-
-    void (async () => {
-      try {
-        const response = await runtimeFetch('/api/preview/targets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ url: targetKey }),
-        });
-
-        if (!response.ok) {
-          previewProxyTargetCache.delete(proxyCacheKey);
-          const errorBody = await response.json().catch(() => ({}));
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          if (!cancelled) {
-            setProxyState({ status: 'error', message });
-          }
-          return;
-        }
-
-        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
-        const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
-        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
-        const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath || !previewToken) {
-          previewProxyTargetCache.delete(proxyCacheKey);
-          if (!cancelled) {
-            setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
-          }
-          return;
-        }
-
-        previewProxyTargetCache.set(proxyCacheKey, { proxyBasePath, previewToken, expiresAt });
-        if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
-        }
-      } catch (error) {
-        previewProxyTargetCache.delete(proxyCacheKey);
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
-          setProxyState({ status: 'error', message });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoopback, proxyCacheKey, proxyRegistrationNonce, t, targetKey]);
-
-  const directSrc = normalizedUrl
-    && (normalizedUrl.protocol === 'http:' || normalizedUrl.protocol === 'https:')
-    ? normalizedUrl.toString()
-    : '';
-
-  const proxyUrlAuthKey = isLoopback && proxyState.status === 'ready'
-    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
-    : '';
-
-  React.useEffect(() => {
-    if (!proxyUrlAuthKey) {
-      setUrlAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setUrlAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [proxyUrlAuthKey]);
-
-  const proxySrc = isLoopback && proxyState.status === 'ready' && normalizedUrl && urlAuthReadyKey === proxyUrlAuthKey
-    ? (() => {
-      const path = normalizedUrl.pathname || '/';
-      const searchParams = new URLSearchParams(normalizedUrl.search);
-      searchParams.delete('oc_url_token');
-      searchParams.delete('oc_client_token');
-      searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('oc_preview_token', proxyState.previewToken || '');
-      const search = searchParams.toString();
-      const hash = normalizedUrl.hash || '';
-      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`);
-    })()
-    : '';
-
-  const effectiveSrc = isLoopback ? proxySrc : directSrc;
-  const headerSrc = isLoopback ? stripPreviewTokenFromUrl(proxySrc) : directSrc;
-  const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle' || urlAuthReadyKey !== proxyUrlAuthKey);
-  const showError = isLoopback && proxyState.status === 'error';
-
-  const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey || !effectiveDirectory) {
-      toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-      return;
-    }
-
-    const pageUrl = rawUrl || effectiveSrc || '';
-    const viewport = typeof window !== 'undefined'
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : { width: 0, height: 0 };
-    const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
-
-    void (async () => {
-      let attachedScreenshot = false;
-      try {
-        const iframe = iframeRef.current;
-        const screenshot = iframe ? await renderPreviewScreenshot(iframe, target) : null;
-        if (screenshot) {
-          await addAttachedFile(screenshot);
-          attachedScreenshot = true;
-        }
-      } catch {
-        attachedScreenshot = false;
-      }
-
-      addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
-        source: 'preview-annotation',
-        fileLabel: pageUrl || 'preview',
-        startLine: 1,
-        endLine: 1,
-        code: formatPreviewAnnotationMarkdown({
-          pageUrl,
-          viewport,
-          devicePixelRatio,
-          target,
-          screenshotAttached: attachedScreenshot,
-          intro: t('contextPanel.preview.inspect.attachAnnotation'),
-        }),
-        language: 'markdown',
-        text: '',
-      });
-      toast.success(t('contextPanel.preview.inspect.attached'));
-    })();
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
-
-  React.useEffect(() => {
-    setBridgeReady(false);
-    setConsoleEvents([]);
-    setConsoleOpen(false);
-    setConsoleFilter('all');
-    setInspectMode(false);
-    setHoverTarget(null);
-    nextConsoleEventIdRef.current = 1;
-  }, [effectiveSrc]);
-
-  React.useEffect(() => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!bridgeReady || !frameWindow) {
-      return;
-    }
-    postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'openchamber-preview-parent',
-      version: 1,
-      type: 'set-inspect-mode',
-      enabled: inspectMode,
-    });
-  }, [bridgeReady, inspectMode, proxySrc]);
-
-  React.useEffect(() => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!bridgeReady || !frameWindow) {
-      return;
-    }
-    postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'openchamber-preview-parent',
-      version: 1,
-      type: 'set-color-scheme',
-      scheme: previewColorScheme,
-    });
-  }, [bridgeReady, previewColorScheme, proxySrc]);
-
-  React.useEffect(() => {
-    if (!inspectMode || typeof window === 'undefined') return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setInspectMode(false);
-      }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [inspectMode]);
-
-  React.useEffect(() => {
-    if (!isLoopback || typeof window === 'undefined') {
-      return;
-    }
-
-    const stringify = (value: unknown): string => {
-      if (typeof value === 'string') return value;
-      if (value === null || value === undefined) return '';
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return String(value);
-      }
-    };
-
-    const pushConsoleEvent = (event: Omit<PreviewConsoleEvent, 'id'>) => {
-      const id = nextConsoleEventIdRef.current;
-      nextConsoleEventIdRef.current += 1;
-      setConsoleEvents((current) => {
-        const next = [...current, { ...event, id }];
-        return next.length > PREVIEW_CONSOLE_EVENT_LIMIT
-          ? next.slice(next.length - PREVIEW_CONSOLE_EVENT_LIMIT)
-          : next;
-      });
-    };
-
-    const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
-      if (event.source !== iframeRef.current?.contentWindow) {
-        return;
-      }
-      const data = event.data;
-      if (!data || data.source !== 'openchamber-preview-bridge' || data.version !== 1) {
-        return;
-      }
-
-      if (data.type === 'ready') {
-        setBridgeReady(true);
-        return;
-      }
-
-      if (data.type === 'console') {
-        const level = data.level === 'error' || data.level === 'warn' || data.level === 'info' || data.level === 'debug'
-          ? data.level
-          : 'log';
-        const args = Array.isArray(data.args) ? data.args.map(stringify).filter(Boolean) : [];
-        pushConsoleEvent({
-          level,
-          message: args.join(' '),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'runtime-error') {
-        const filename = stringify(data.filename);
-        const line = typeof data.line === 'number' ? data.line : null;
-        const column = typeof data.column === 'number' ? data.column : null;
-        const location = filename
-          ? `${filename}${line !== null ? `:${line}${column !== null ? `:${column}` : ''}` : ''}`
-          : '';
-        const stack = stringify(data.stack);
-        pushConsoleEvent({
-          level: 'runtime',
-          message: stringify(data.message) || t('contextPanel.preview.console.runtimeError'),
-          details: [location, stack].filter(Boolean).join('\n'),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'resource-error') {
-        const tag = stringify(data.tag) || 'resource';
-        const url = stringify(data.url);
-        pushConsoleEvent({
-          level: 'resource',
-          message: url ? `${tag}: ${url}` : tag,
-          details: stringify(data.outerHTML),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'hover') {
-        setHoverTarget(isPreviewElementMetadata(data.target) ? data.target : null);
-        return;
-      }
-
-      if (data.type === 'select' && isPreviewElementMetadata(data.target)) {
-        setHoverTarget(data.target);
-        setInspectMode(false);
-        attachPreviewAnnotation(data.target);
-        return;
-      }
-
-      if (data.type === 'navigate-preview') {
-        const nextUrl = typeof data.url === 'string' ? data.url : '';
-        const navigation = data.navigation === 'external' ? 'external' : 'proxy';
-        if (nextUrl && navigation === 'external') {
-          void openExternalUrl(nextUrl);
-          return;
-        }
-        if (nextUrl) {
-          onNavigate(nextUrl);
-        }
-      }
-    };
-
-    window.addEventListener('message', handler);
-    return () => {
-      window.removeEventListener('message', handler);
-    };
-  }, [attachPreviewAnnotation, isLoopback, onNavigate, t]);
-
-  const consoleErrorCount = consoleEvents.filter((event) => event.level === 'error' || event.level === 'runtime' || event.level === 'resource').length;
-  const filteredConsoleEvents = consoleEvents.filter((event) => getPreviewConsoleFilterMatch(event, consoleFilter));
-
-  const copyConsoleEvents = React.useCallback(() => {
-    const header = [
-      `Preview URL: ${rawUrl || effectiveSrc || ''}`,
-      `Events: ${consoleEvents.length}`,
-      '',
-    ].join('\n');
-    const text = consoleEvents.map((event) => {
-      const timestamp = new Date(event.ts).toISOString();
-      const details = event.details ? `\n${event.details}` : '';
-      return `[${timestamp}] [${event.level}] ${event.message}${details}`;
-    }).join('\n');
-
-    void copyTextToClipboard(`${header}${text}`).then((result) => {
-      if (result.ok) {
-        toast.success(t('contextPanel.preview.console.copied'));
-      } else {
-        toast.error(t('contextPanel.preview.console.copyFailed'));
-      }
-    });
-  }, [consoleEvents, effectiveSrc, rawUrl, t]);
-
-  const attachConsoleEvents = React.useCallback(() => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey || !effectiveDirectory) {
-      toast.error(t('contextPanel.preview.console.attachNoSession'));
-      return;
-    }
-
-    const header = [
-      `Preview URL: ${rawUrl || effectiveSrc || ''}`,
-      `Events: ${consoleEvents.length}`,
-      '',
-    ].join('\n');
-    const text = consoleEvents.map((event) => {
-      const timestamp = new Date(event.ts).toISOString();
-      const details = event.details ? `\n${event.details}` : '';
-      return `[${timestamp}] [${event.level}] ${event.message}${details}`;
-    }).join('\n');
-
-    addInlineCommentDraft({ directory: effectiveDirectory, sessionKey }, {
-      source: 'preview-console',
-      fileLabel: rawUrl || effectiveSrc || 'preview',
-      startLine: 1,
-      endLine: Math.max(1, consoleEvents.length),
-      code: `${header}${text}`,
-      language: 'text',
-      text: t('contextPanel.preview.console.attachAnnotation'),
-    });
-    toast.success(t('contextPanel.preview.console.attached'));
-  }, [addInlineCommentDraft, consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, newSessionDraftOpen, rawUrl, t]);
-
-  // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
-  // so when the proxy returns a 502 (upstream dev server is offline) the iframe
-  // would just render the raw JSON error body. Probe the proxy URL with a GET
-  // request and surface a friendly overlay when the upstream is unreachable.
-  type UpstreamState = 'unknown' | 'starting' | 'reachable' | 'unreachable';
-  const [upstreamState, setUpstreamState] = React.useState<UpstreamState>('unknown');
-  const upstreamProbeStartedAtRef = React.useRef<number>(0);
-  const upstreamProbeAttemptRef = React.useRef<number>(0);
-  const upstreamProbeKeyRef = React.useRef<string>('');
-  const proxyRecoveryAttemptedKeyRef = React.useRef<string>('');
-  const PREVIEW_STARTUP_GRACE_MS = 15_000;
-
-  React.useEffect(() => {
-    if (!proxySrc) {
-      setUpstreamState('unknown');
-      upstreamProbeKeyRef.current = '';
-      upstreamProbeStartedAtRef.current = 0;
-      upstreamProbeAttemptRef.current = 0;
-      return;
-    }
-
-    let cancelled = false;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-    if (upstreamProbeKeyRef.current !== proxyCacheKey) {
-      upstreamProbeKeyRef.current = proxyCacheKey;
-      upstreamProbeStartedAtRef.current = Date.now();
-      upstreamProbeAttemptRef.current = 0;
-    }
-    const scheduleRetry = (delay: number) => {
-      retryTimeout = setTimeout(() => {
-        if (!cancelled) bumpReload();
-      }, delay);
-    };
-    setUpstreamState('unknown');
-
-    void (async () => {
-      const probe = async (): Promise<Response | null> => {
-        try {
-          return await runtimeFetch(proxySrc, {
-            method: 'GET',
-            credentials: 'include',
-            cache: 'no-store',
-            redirect: 'manual',
-          });
-        } catch {
-          return null;
-        }
-      };
-
-      const response = await probe();
-
-      if (cancelled) return;
-
-      if (!response) {
-        setUpstreamState('unreachable');
-        scheduleRetry(5000);
-        return;
-      }
-
-      const recoveryAction = getPreviewTargetRecoveryAction(
-        response.headers,
-        proxyRecoveryAttemptedKeyRef.current === proxyCacheKey,
-      );
-      if (recoveryAction !== 'none') {
-        previewProxyTargetCache.delete(proxyCacheKey);
-        if (recoveryAction === 'retry-registration') {
-          proxyRecoveryAttemptedKeyRef.current = proxyCacheKey;
-          setProxyState({ status: 'loading' });
-          bumpProxyRegistration();
-        } else {
-          const errorBody = await response.json().catch(() => ({}));
-          if (cancelled) return;
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          setProxyState({ status: 'error', message });
-        }
-        return;
-      }
-
-      // The proxy emits 502 when the upstream is unreachable. Anything else
-      // (including 4xx from the upstream) means the upstream answered.
-      if (response.status !== 502) {
-        proxyRecoveryAttemptedKeyRef.current = '';
-        setUpstreamState('reachable');
-        return;
-      }
-
-      const startedAt = upstreamProbeStartedAtRef.current || Date.now();
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < PREVIEW_STARTUP_GRACE_MS) {
-        // Dev servers can take a moment to bind. During the grace window,
-        // keep retrying and show a softer "starting" state.
-        setUpstreamState('starting');
-        upstreamProbeAttemptRef.current += 1;
-        const attempt = upstreamProbeAttemptRef.current;
-        const delay = Math.min(2000, 250 * Math.pow(2, Math.min(4, attempt)));
-        scheduleRetry(delay);
-        return;
-      }
-
-      setUpstreamState('unreachable');
-      scheduleRetry(5000);
-    })();
-
-    return () => {
-      cancelled = true;
-      if (retryTimeout) clearTimeout(retryTimeout);
-    };
-  }, [proxyCacheKey, proxySrc, reloadNonce]);
-
-  const showUpstreamStarting = isLoopback
-    && proxyState.status === 'ready'
-    && (upstreamState === 'unknown' || upstreamState === 'starting');
-
-  const showUpstreamUnreachable = isLoopback
-    && proxyState.status === 'ready'
-    && upstreamState === 'unreachable';
-
-  const handlePreviewFrameLoad = React.useCallback((event: React.SyntheticEvent<HTMLIFrameElement>) => {
-    if (!isLoopback || proxyState.status !== 'ready') {
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const frameWindow = event.currentTarget.contentWindow;
-    if (!frameWindow) {
-      return;
-    }
-
-    try {
-      const location = frameWindow.location;
-      const proxyOrigin = getPreviewProxyOrigin(proxySrc);
-      if (location.origin !== proxyOrigin) {
-        return;
-      }
-      if (location.pathname.startsWith(proxyState.proxyBasePath)) {
-        return;
-      }
-
-      const nextPath = `${proxyState.proxyBasePath}${location.pathname}${location.search}${location.hash}`;
-      frameWindow.location.replace(nextPath);
-    } catch {
-      // Cross-origin frames are expected for non-loopback/direct previews.
-    }
-  }, [isLoopback, proxySrc, proxyState]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
-        <div className="min-w-0 flex-1 truncate typography-micro text-muted-foreground" title={headerSrc || rawUrl}>
-          {headerSrc || rawUrl || t('contextPanel.preview.empty')}
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0"
-          onClick={() => bumpReload()}
-          title={t('contextPanel.preview.actions.reload')}
-          aria-label={t('contextPanel.preview.actions.reload')}
-          disabled={!effectiveSrc}
-        >
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0"
-          onClick={() => {
-            if (!directSrc) return;
-            void openExternalUrl(directSrc);
-          }}
-          title={t('contextPanel.preview.actions.openExternal')}
-          aria-label={t('contextPanel.preview.actions.openExternal')}
-          disabled={!directSrc}
-        >
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-        {isLoopback ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={inspectMode ? 'secondary' : 'ghost'}
-            className="h-7 gap-1 px-2"
-            onClick={() => setInspectMode((value) => !value)}
-            title={t('contextPanel.preview.inspect.toggle')}
-            aria-label={t('contextPanel.preview.inspect.toggle')}
-            disabled={!bridgeReady}
-          >
-            <Icon name="cursor" className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
-        {isLoopback ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={consoleOpen ? 'secondary' : 'ghost'}
-            className="h-7 gap-1 px-2"
-            onClick={() => setConsoleOpen((value) => !value)}
-            title={bridgeReady ? t('contextPanel.preview.console.open') : t('contextPanel.preview.console.waiting')}
-            aria-label={bridgeReady ? t('contextPanel.preview.console.open') : t('contextPanel.preview.console.waiting')}
-            disabled={!bridgeReady && consoleEvents.length === 0}
-          >
-            <Icon name="terminal-box" className="h-3.5 w-3.5" />
-            {consoleErrorCount > 0 ? (
-              <span className="typography-micro text-status-error">{consoleErrorCount}</span>
-            ) : null}
-          </Button>
-        ) : null}
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        {showUpstreamStarting ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.startingServer')}</div>
-            <div className="text-xs opacity-70">{t('contextPanel.preview.startingServerHint')}</div>
-          </div>
-        ) : showUpstreamUnreachable ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.upstreamUnreachable')}</div>
-            <div className="text-xs opacity-70">{t('contextPanel.preview.upstreamUnreachableHint')}</div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => bumpReload()}
-            >
-              {t('contextPanel.preview.actions.retry')}
-            </Button>
-          </div>
-        ) : effectiveSrc && (!isLoopback || upstreamState === 'reachable') ? (
-          <div className="relative h-full w-full">
-            <iframe
-              ref={iframeRef}
-              key={`${effectiveSrc}:${reloadNonce}`}
-              src={effectiveSrc}
-              title={t('contextPanel.preview.iframeTitle')}
-              className="h-full w-full border-0"
-              style={{ colorScheme: previewColorScheme }}
-              onLoad={handlePreviewFrameLoad}
-              sandbox={isLoopback
-                ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
-                : 'allow-scripts allow-forms'}
-            />
-            {inspectMode && hoverTarget ? (
-              <div
-                className="pointer-events-none absolute rounded-sm border-2 border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/35"
-                style={{
-                  left: hoverTarget.bounds.x,
-                  top: hoverTarget.bounds.y,
-                  width: hoverTarget.bounds.width,
-                  height: hoverTarget.bounds.height,
-                }}
-              >
-                <div className="absolute -top-6 left-0 max-w-64 truncate rounded bg-[var(--surface-elevated)] px-2 py-0.5 typography-micro text-foreground shadow">
-                  {hoverTarget.tag}{hoverTarget.text ? ` · ${hoverTarget.text}` : ''}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : showLoading ? (
-          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {t('contextPanel.preview.loading')}
-          </div>
-        ) : showError ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.proxyError')}</div>
-            {proxyState.status === 'error' ? (
-              <div className="text-center text-xs opacity-70">{proxyState.message}</div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {t('contextPanel.preview.invalidUrl')}
-          </div>
-        )}
-        {consoleOpen ? (
-          <div className="absolute inset-x-3 bottom-3 z-10 max-h-[45%] overflow-hidden rounded-xl border border-border/70 bg-[var(--surface-elevated)] shadow-lg">
-            <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-              <div className="typography-ui-label text-foreground">{t('contextPanel.preview.console.title')}</div>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={attachConsoleEvents}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.attach')}
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={copyConsoleEvents}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.copy')}
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setConsoleEvents([])}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.clear')}
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center gap-1 border-b border-border/30 px-3 py-1.5">
-              {(['all', 'errors', 'warnings', 'logs'] as const).map((filter) => (
-                <Button
-                  key={filter}
-                  type="button"
-                  size="xs"
-                  variant={consoleFilter === filter ? 'secondary' : 'ghost'}
-                  onClick={() => setConsoleFilter(filter)}
-                >
-                  {filter === 'all'
-                    ? t('contextPanel.preview.console.filter.all')
-                    : filter === 'errors'
-                      ? t('contextPanel.preview.console.filter.errors')
-                      : filter === 'warnings'
-                        ? t('contextPanel.preview.console.filter.warnings')
-                        : t('contextPanel.preview.console.filter.logs')}
-                </Button>
-              ))}
-            </div>
-            <div className="max-h-64 overflow-auto p-2 typography-code text-xs">
-              {consoleEvents.length === 0 ? (
-                <div className="px-2 py-3 text-muted-foreground">{t('contextPanel.preview.console.empty')}</div>
-              ) : filteredConsoleEvents.length === 0 ? (
-                <div className="px-2 py-3 text-muted-foreground">{t('contextPanel.preview.console.noFilteredEvents')}</div>
-              ) : filteredConsoleEvents.map((event) => (
-                <div key={event.id} className="border-b border-border/30 px-2 py-1 last:border-b-0">
-                  <div className="flex gap-2">
-                    <span className={cn(
-                      'shrink-0 uppercase',
-                      event.level === 'error' || event.level === 'runtime' || event.level === 'resource'
-                        ? 'text-status-error'
-                        : event.level === 'warn'
-                          ? 'text-status-warning'
-                          : 'text-muted-foreground'
-                    )}>
-                      {event.level}
-                    </span>
-                    <span className="min-w-0 break-words text-foreground">{event.message}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
-type DesktopBrowserPaneProps = {
-  initialUrl: string;
-  directory: string;
-  tabID: string;
-};
-
-const isElectronBrowserRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
-};
-
-const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
-  const { t } = useI18n();
-  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
-  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const normalized = normalizeBrowserUrl(initialUrl);
-  const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const [urlInput, setUrlInput] = React.useState(startUrl);
-  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
-  const [loadedUrl, setLoadedUrl] = React.useState(startUrl);
-  const [history, setHistory] = React.useState<string[]>(() => startUrl ? [startUrl] : []);
-  const [historyIndex, setHistoryIndex] = React.useState(() => startUrl ? 0 : -1);
-  const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
-  const [isLoading, setIsLoading] = React.useState(Boolean(startUrl));
-  const [isInspecting, setIsInspecting] = React.useState(false);
-  const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
-  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
-
-  const persistUrl = React.useCallback((url: string) => {
-    if (!url || url === 'about:blank' || !directory || !tabID) return;
-    setContextPanelTabTargetPath(directory, tabID, url);
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const applyUrl = React.useCallback((url: string, options?: { replaceHistory?: boolean; inFrame?: boolean }) => {
-    const normalizedUrl = normalizeBrowserUrl(url);
-    const nextUrl = normalizedUrl !== 'about:blank' ? normalizedUrl : '';
-    setCurrentUrl(nextUrl);
-    setUrlInput(nextUrl);
-    if (!options?.inFrame) {
-      setLoadedUrl(nextUrl);
-      setIsLoading(Boolean(nextUrl));
-    } else {
-      setIsLoading(false);
-    }
-    persistUrl(nextUrl);
-
-    setHistory((current) => {
-      if (!nextUrl) {
-        setHistoryIndex(-1);
-        return [];
-      }
-
-      if (options?.replaceHistory) {
-        return current;
-      }
-
-      const kept = historyIndex >= 0 ? current.slice(0, historyIndex + 1) : [];
-      const previous = kept[kept.length - 1];
-      if (previous === nextUrl) {
-        setHistoryIndex(kept.length - 1);
-        return kept;
-      }
-
-      const nextHistory = [...kept, nextUrl];
-      setHistoryIndex(nextHistory.length - 1);
-      return nextHistory;
-    });
-  }, [historyIndex, persistUrl]);
-
-  const goToHistory = React.useCallback((nextIndex: number) => {
-    const nextUrl = history[nextIndex];
-    if (!nextUrl) return;
-    setHistoryIndex(nextIndex);
-    setCurrentUrl(nextUrl);
-    setLoadedUrl(nextUrl);
-    setUrlInput(nextUrl);
-    setIsLoading(true);
-    persistUrl(nextUrl);
-  }, [history, persistUrl]);
-
-  const handleReload = React.useCallback(() => {
-    if (!currentUrl) return;
-    setIsLoading(true);
-    try {
-      iframeRef.current?.contentWindow?.location.reload();
-    } catch {
-      bumpReload();
-    }
-  }, [currentUrl]);
-
-  React.useEffect(() => {
-    if (!loadedUrl) {
-      setProxyState({ status: 'idle' });
-      return;
-    }
-
-    const proxyTargetKey = getBrowserProxyTargetKey(loadedUrl);
-    const cached = getCachedProxyTarget(proxyTargetKey);
-    if (cached?.previewToken) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
-      return;
-    }
-    if (cached) {
-      previewProxyTargetCache.delete(proxyTargetKey);
-    }
-
-    let cancelled = false;
-    setProxyState({ status: 'loading' });
-    setIsLoading(true);
-
-    void (async () => {
-      try {
-        const response = await runtimeFetch('/api/preview/targets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ url: loadedUrl, allowExternal: true }),
-        });
-
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          if (!cancelled) {
-            setProxyState({ status: 'error', message });
-          }
-          return;
-        }
-
-        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
-        const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
-        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
-        const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath || !previewToken) {
-          if (!cancelled) {
-            setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
-          }
-          return;
-        }
-
-        previewProxyTargetCache.set(proxyTargetKey, { proxyBasePath, previewToken, expiresAt });
-        if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
-          setProxyState({ status: 'error', message });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedUrl, t]);
-
-  const proxyUrlAuthKey = loadedUrl && proxyState.status === 'ready'
-    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
-    : '';
-
-  React.useEffect(() => {
-    if (!proxyUrlAuthKey) {
-      setUrlAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setUrlAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [proxyUrlAuthKey]);
-
-  const proxySrc = React.useMemo(() => {
-    if (urlAuthReadyKey !== proxyUrlAuthKey) return '';
-    if (!loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsed = new URL(loadedUrl);
-      const path = parsed.pathname || '/';
-      const searchParams = new URLSearchParams(parsed.search);
-      searchParams.delete('oc_url_token');
-      searchParams.delete('oc_client_token');
-      searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('oc_preview_token', proxyState.previewToken || '');
-      const search = searchParams.toString();
-      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${parsed.hash}`);
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState, proxyUrlAuthKey, reloadNonce, urlAuthReadyKey]);
-
-  const iframeSrc = proxySrc || (proxyState.status === 'error' ? loadedUrl : '');
-
-  const getCurrentUrlFromFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
-        ? proxyState.proxyBasePath.slice(0, -1)
-        : proxyState.proxyBasePath;
-      if (parsedFrameUrl.origin !== window.location.origin || !parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
-        return '';
-      }
-
-      const rest = parsedFrameUrl.pathname.slice(proxyBasePath.length) || '/';
-      const upstreamOrigin = new URL(loadedUrl).origin;
-      return stripPreviewQueryParams(new URL(`${rest}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState]);
-
-  const getUpstreamUrlFromLocalFrameUrl = React.useCallback((frameUrl: string): string => {
-    if (!frameUrl || !loadedUrl || proxyState.status !== 'ready') return '';
-    try {
-      const parsedFrameUrl = new URL(frameUrl, window.location.origin);
-      const upstreamOrigin = new URL(loadedUrl).origin;
-      if (parsedFrameUrl.origin !== window.location.origin || upstreamOrigin === window.location.origin) {
-        return '';
-      }
-
-      const proxyBasePath = proxyState.proxyBasePath.endsWith('/')
-        ? proxyState.proxyBasePath.slice(0, -1)
-        : proxyState.proxyBasePath;
-      if (parsedFrameUrl.pathname.startsWith(proxyBasePath)) {
-        return '';
-      }
-
-      return stripPreviewQueryParams(new URL(`${parsedFrameUrl.pathname}${parsedFrameUrl.search}${parsedFrameUrl.hash}`, upstreamOrigin).toString());
-    } catch {
-      return '';
-    }
-  }, [loadedUrl, proxyState]);
-
-  const postInspectMode = React.useCallback((enabled: boolean) => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!frameWindow) return;
-    frameWindow.postMessage({
-      source: 'openchamber-preview-parent',
-      version: 1,
-      type: 'set-inspect-mode',
-      enabled,
-    }, window.location.origin);
-  }, []);
-
-  const attachBrowserAnnotation = React.useCallback(async (target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-    if (!sessionKey) {
-      toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-      return;
-    }
-
-    const iframe = iframeRef.current;
-    const frameWindow = iframe?.contentWindow;
-    const rect = iframe?.getBoundingClientRect();
-    const viewport = {
-      width: Number.isFinite(frameWindow?.innerWidth) ? frameWindow?.innerWidth ?? rect?.width ?? 0 : rect?.width ?? 0,
-      height: Number.isFinite(frameWindow?.innerHeight) ? frameWindow?.innerHeight ?? rect?.height ?? 0 : rect?.height ?? 0,
-    };
-
-    const file = iframe ? await renderPreviewScreenshot(iframe, target) : null;
-    const screenshotAttached = Boolean(file);
-    if (file) {
-      await addAttachedFile(file);
-    }
-
-    addInlineCommentDraft({ directory, sessionKey }, {
-      source: 'preview-annotation',
-      fileLabel: currentUrl || 'browser',
-      startLine: 1,
-      endLine: 1,
-      code: formatPreviewAnnotationMarkdown({
-        pageUrl: currentUrl,
-        viewport,
-        devicePixelRatio: window.devicePixelRatio || 1,
-        target,
-        screenshotAttached,
-        intro: t(screenshotAttached
-          ? 'contextPanel.preview.inspect.attachAnnotationWithScreenshot'
-          : 'contextPanel.preview.inspect.attachAnnotation'),
-      }),
-      language: 'markdown',
-      text: '',
-    });
-    toast.success(t('contextPanel.preview.inspect.attached'));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, newSessionDraftOpen, t]);
-
-  const cancelInspect = React.useCallback(() => {
-    const iframe = iframeRef.current;
-    setHoverTarget(null);
-    postInspectMode(false);
-    if (!iframe) return;
-    void runIframeScript<unknown>(iframe, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {});
-  }, [postInspectMode]);
-
-  React.useEffect(() => {
-    if (!isInspecting) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsInspecting(false);
-      cancelInspect();
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [cancelInspect, isInspecting]);
-
-  React.useEffect(() => () => cancelInspect(), [cancelInspect]);
-
-  React.useEffect(() => {
-    const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
-      if (event.source !== iframeRef.current?.contentWindow) return;
-      const data = event.data;
-      if (!data || data.source !== 'openchamber-preview-bridge' || data.version !== 1) return;
-
-      if (data.type === 'ready') {
-        const frameUrl = typeof data.url === 'string' ? data.url : '';
-        const nextUrl = getCurrentUrlFromFrameUrl(frameUrl);
-        if (nextUrl && nextUrl !== currentUrl) {
-          applyUrl(nextUrl, { inFrame: true });
-        }
-        return;
-      }
-
-      if (data.type === 'hover') {
-        setHoverTarget(isPreviewElementMetadata(data.target) ? data.target : null);
-        return;
-      }
-
-      if (data.type === 'select' && isPreviewElementMetadata(data.target)) {
-        setHoverTarget(null);
-        setIsInspecting(false);
-        postInspectMode(false);
-        void attachBrowserAnnotation(data.target);
-        return;
-      }
-
-      if (data.type === 'navigate-preview') {
-        const nextUrl = typeof data.url === 'string' ? data.url : '';
-        const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(nextUrl);
-        if (upstreamUrl) {
-          applyUrl(upstreamUrl);
-          return;
-        }
-        if (nextUrl) {
-          applyUrl(nextUrl);
-        }
-      }
-    };
-
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, [applyUrl, attachBrowserAnnotation, currentUrl, getCurrentUrlFromFrameUrl, getUpstreamUrlFromLocalFrameUrl, postInspectMode]);
-
-  const handleInspect = React.useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe || !currentUrl) return;
-
-    if (isInspecting) {
-      setIsInspecting(false);
-      cancelInspect();
-      return;
-    }
-
-    if (proxySrc) {
-      setHoverTarget(null);
-      setIsInspecting(true);
-      postInspectMode(true);
-      return;
-    }
-
-    setIsInspecting(true);
-    void (async () => {
-      try {
-        const target = await runIframeScript<unknown>(iframe, DESKTOP_BROWSER_INSPECT_SCRIPT);
-        setIsInspecting(false);
-        if (!target || !isPreviewElementMetadata(target)) return;
-        await attachBrowserAnnotation(target);
-      } catch {
-        setIsInspecting(false);
-        toast.error(t('contextPanel.browser.inspectUnavailable'));
-      }
-    })();
-  }, [attachBrowserAnnotation, cancelInspect, currentUrl, isInspecting, postInspectMode, proxySrc, t]);
-
-  const handleIframeLoad = React.useCallback(() => {
-    try {
-      const frameUrl = iframeRef.current?.contentWindow?.location.href || '';
-      const upstreamUrl = getUpstreamUrlFromLocalFrameUrl(frameUrl);
-      if (upstreamUrl) {
-        applyUrl(upstreamUrl, { inFrame: true });
-        return;
-      }
-    } catch {
-      // Cross-origin direct iframe fallback; regular load handling still applies.
-    }
-
-    setIsLoading(false);
-    if (isInspecting && proxySrc) {
-      postInspectMode(true);
-    }
-  }, [applyUrl, getUpstreamUrlFromLocalFrameUrl, isInspecting, postInspectMode, proxySrc]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex <= 0} onClick={() => goToHistory(historyIndex - 1)}>
-          <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={historyIndex < 0 || historyIndex >= history.length - 1} onClick={() => goToHistory(historyIndex + 1)}>
-          <Icon name="arrow-right" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={handleReload}>
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); applyUrl(urlInput); }}>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
-            aria-label={t('contextPanel.browser.addressAria')}
-          />
-        </form>
-        <Button
-          type="button"
-          variant={isInspecting ? 'secondary' : 'ghost'}
-          size="sm"
-          className="h-7 w-7 p-0"
-          disabled={!currentUrl}
-          onClick={handleInspect}
-          title={t('contextPanel.preview.inspect.toggle')}
-          aria-label={t('contextPanel.preview.inspect.toggle')}
-        >
-          <Icon name="cursor" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={!currentUrl} onClick={() => void openExternalUrl(currentUrl)}>
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        {iframeSrc ? (
-          <div className="absolute inset-0">
-            <iframe
-              key={`${tabID}:${reloadNonce}`}
-              ref={iframeRef}
-              src={iframeSrc}
-              title={t('contextPanel.browser.empty')}
-              className="absolute inset-0 h-full w-full border-0 bg-background"
-              allow="clipboard-read; clipboard-write; fullscreen"
-              allowFullScreen
-              onLoad={handleIframeLoad}
-            />
-            {isInspecting && hoverTarget ? (
-              <div
-                className="pointer-events-none absolute rounded-sm border-2 border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/35"
-                style={{
-                  left: hoverTarget.bounds.x,
-                  top: hoverTarget.bounds.y,
-                  width: hoverTarget.bounds.width,
-                  height: hoverTarget.bounds.height,
-                }}
-              >
-                <div className="absolute -top-6 left-0 max-w-64 truncate rounded bg-[var(--surface-elevated)] px-2 py-0.5 typography-micro text-foreground shadow">
-                  {hoverTarget.tag}{hoverTarget.text ? ` · ${hoverTarget.text}` : ''}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <OpenChamberLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
-            <span className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.browser.emptyHint')}</span>
-            <span className="max-w-md typography-micro leading-relaxed text-status-warning/70">{t('contextPanel.browser.trustNotice')}</span>
-          </div>
-        )}
-        {isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
-            {t('common.loading')}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
-const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID }) => {
-  const { t } = useI18n();
-  const webviewRef = React.useRef<WebviewElement | null>(null);
-  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const normalized = normalizeBrowserUrl(initialUrl);
-  const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const initialWebviewSrcRef = React.useRef(normalizeBrowserUrl(initialUrl));
-  const [urlInput, setUrlInput] = React.useState(startUrl);
-  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
-  const [isInspecting, setIsInspecting] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showLoading = isLoading;
-
-  const persistUrl = React.useCallback((url: string) => {
-    if (!url || url === 'about:blank' || !directory || !tabID) return;
-    setContextPanelTabTargetPath(directory, tabID, url);
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
-  const addInlineCommentDraft = useInlineCommentDraftStore((state) => state.addDraft);
-  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
-
-  // Listen to webview navigation events
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    const syncUrl = () => {
-      try {
-        const url = webview.getURL();
-        if (url && url !== 'about:blank') {
-          setCurrentUrl(url);
-          setUrlInput(url);
-          persistUrl(url);
-        }
-      } catch { /* webview not ready */ }
-    };
-
-    const onNavigate = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string }>).detail;
-      if (typeof detail?.url === 'string' && detail.url) {
-        setCurrentUrl(detail.url);
-        setUrlInput(detail.url);
-        persistUrl(detail.url);
-      }
-    };
-
-    const onStartLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      loadingTimerRef.current = setTimeout(() => setIsLoading(true), 200);
-    };
-    const onStopLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      setIsLoading(false);
-      syncUrl();
-    };
-
-    const onNewWindow = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string; disposition: string }>).detail;
-      if (detail?.disposition === 'new-window' || detail?.disposition === 'foreground-tab' || detail?.disposition === 'background-tab') {
-        event.preventDefault();
-        const w = webviewRef.current;
-        if (typeof w?.loadURL === 'function' && detail.url) {
-          w.loadURL(detail.url);
-        }
-      }
-    };
-
-    const installSameWebviewNavigation = () => {
-      try {
-        webview.executeJavaScript?.(DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT, true).catch(() => {});
-      } catch { /* webview not ready */ }
-    };
-
-    webview.addEventListener('did-navigate', onNavigate);
-    webview.addEventListener('did-navigate-in-page', onNavigate);
-    webview.addEventListener('did-start-loading', onStartLoading);
-    webview.addEventListener('did-stop-loading', onStopLoading);
-    webview.addEventListener('new-window', onNewWindow);
-    webview.addEventListener('dom-ready', installSameWebviewNavigation);
-
-    // Check current loading state imperatively — we may have missed the event
-    try {
-      if (!webview.isLoading()) {
-        setIsLoading(false);
-        syncUrl();
-      }
-    } catch { /* webview not ready */ }
-    installSameWebviewNavigation();
-
-    return () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      webview.removeEventListener('did-navigate', onNavigate);
-      webview.removeEventListener('did-navigate-in-page', onNavigate);
-      webview.removeEventListener('did-start-loading', onStartLoading);
-      webview.removeEventListener('did-stop-loading', onStopLoading);
-      webview.removeEventListener('new-window', onNewWindow);
-      webview.removeEventListener('dom-ready', installSameWebviewNavigation);
-    };
-  }, [persistUrl]);
-
-  // Safety timeout: hide loading overlay after 30s even if events fire late
-  React.useEffect(() => {
-    const safety = setTimeout(() => setIsLoading(false), 30_000);
-    return () => clearTimeout(safety);
-  }, []);
-
-  // Escape key cancels inspect mode
-  React.useEffect(() => {
-    if (!isInspecting) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsInspecting(false);
-      const webview = webviewRef.current;
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [isInspecting]);
-
-  // Cancel inspect on unmount
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    return () => {
-      try {
-        const url = webview?.getURL?.();
-        if (url && url !== 'about:blank') {
-          setContextPanelTabTargetPath(directory, tabID, url);
-        }
-      } catch { /* webview not ready */ }
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const loadUrl = React.useCallback((value: string) => {
-    const webview = webviewRef.current;
-    if (typeof webview?.loadURL !== 'function') return;
-    const nextUrl = normalizeBrowserUrl(value);
-    try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
-  }, []);
-
-  const handleInspect = React.useCallback(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    if (isInspecting) {
-      setIsInspecting(false);
-      try { webview.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-      return;
-    }
-
-    setIsInspecting(true);
-    webview.executeJavaScript?.(DESKTOP_BROWSER_INSPECT_SCRIPT, true)
-      .then(async (target: unknown) => {
-        setIsInspecting(false);
-        if (!target || !isPreviewElementMetadata(target)) return;
-
-        const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
-        if (!sessionKey) {
-          toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-          return;
-        }
-
-        const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
-        if (wcId === null || wcId === undefined) return;
-
-        const capture = await invokeDesktopCommand<{ mime: string; base64: string; width: number; height: number }>(
-          'desktop_browser_capture_page', { webContentsId: wcId }
-        );
-
-        const cssViewport = await webview.executeJavaScript?.(
-          '({ width: window.innerWidth, height: window.innerHeight })', true
-        ).catch(() => null) as { width: number; height: number } | null | undefined;
-
-        const cssWidth = Number.isFinite(cssViewport?.width) ? (cssViewport as { width: number }).width : capture.width;
-        const cssHeight = Number.isFinite(cssViewport?.height) ? (cssViewport as { height: number }).height : capture.height;
-
-        const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
-        const screenshotAttached = Boolean(file);
-        if (file) {
-          await addAttachedFile(file);
-        }
-
-        addInlineCommentDraft({ directory, sessionKey }, {
-          source: 'preview-annotation',
-          fileLabel: currentUrl || 'browser',
-          startLine: 1,
-          endLine: 1,
-          code: formatPreviewAnnotationMarkdown({
-            pageUrl: currentUrl,
-            viewport: { width: cssWidth, height: cssHeight },
-            devicePixelRatio: window.devicePixelRatio || 1,
-            target,
-            screenshotAttached,
-            intro: t('contextPanel.preview.inspect.attachAnnotationWithScreenshot'),
-          }),
-          language: 'markdown',
-          text: '',
-        });
-        toast.success(t('contextPanel.preview.inspect.attached'));
-      })
-      .catch(() => setIsInspecting(false));
-  }, [addAttachedFile, addInlineCommentDraft, currentSessionId, currentUrl, directory, isInspecting, newSessionDraftOpen, t]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border/40 bg-[var(--surface-background)] px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-right" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
-            aria-label={t('contextPanel.browser.addressAria')}
-          />
-        </form>
-        <Button
-          type="button"
-          variant={isInspecting ? 'secondary' : 'ghost'}
-          size="sm"
-          className="h-7 w-7 p-0"
-          onClick={handleInspect}
-          title={t('contextPanel.preview.inspect.toggle')}
-          aria-label={t('contextPanel.preview.inspect.toggle')}
-        >
-          <Icon name="cursor" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        <webview
-          ref={webviewRef}
-          src={initialWebviewSrcRef.current}
-          partition="persist:openchamber-browser"
-          allowpopups
-          style={{ width: '100%', height: '100%', border: 'none' }}
-        />
-        {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <OpenChamberLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
-          </div>
-        ) : null}
-        {showLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
-            {t('common.loading')}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
 
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
@@ -2225,29 +523,96 @@ export const ContextPanel: React.FC = () => {
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
+  const pinContextPanelTab = useUIStore((state) => state.pinContextPanelTab);
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
+  const openAgentBrowserTab = useUIStore((state) => state.openAgentBrowserTab);
+
+  // A browser tab loads its page only once it is needed: shown in the open
+  // panel, opened by the agent, or woken by an agent action. Tabs restored
+  // from a previous run otherwise stay asleep, since every loaded tab costs a
+  // Chromium process. Once loaded, a tab stays loaded until it is closed.
+  const [wokenBrowserTabIds, setWokenBrowserTabIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const wakeBrowserTab = React.useCallback((tabId: string) => {
+    setWokenBrowserTabIds((current) => (current.has(tabId) ? current : new Set(current).add(tabId)));
+  }, []);
+
+  // Lets an agent's browser.open create its own tab; the id goes back to the
+  // agent so it keeps working there. Registered from the panel because opening a tab is panel state, not
+  // something the browser view itself can do before it exists. Background on
+  // purpose: an agent working a page must not pop the panel open or steal the
+  // active tab while the user reads something else, and that includes taking
+  // a screenshot of it. The tab appears in the strip.
+  React.useEffect(() => {
+    if (!effectiveDirectory) return;
+    return registerBrowserOpener((url) => {
+      const tabId = openAgentBrowserTab(effectiveDirectory, url);
+      if (tabId) wakeBrowserTab(tabId);
+      return tabId;
+    });
+  }, [effectiveDirectory, openAgentBrowserTab, wakeBrowserTab]);
+  // The agent asked for a file to be shown. It opens in front of whatever tab
+  // the user had, on purpose: the agent is pointing at a result, and the prior
+  // tab is one click away.
+  const openContextFile = useUIStore((state) => state.openContextFile);
+  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+    if (event.type !== 'file-open-request') return;
+    const directory = event.directory ?? effectiveDirectory;
+    if (!directory) return;
+    openContextFile(directory, event.path);
+  }), [effectiveDirectory, openContextFile]);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
+  const contextEditorTreeWidth = useUIStore((state) => state.contextEditorTreeWidth);
+  const setContextEditorTreeWidth = useUIStore((state) => state.setContextEditorTreeWidth);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
+  const contextEditorVisible = useUIStore((state) => state.contextEditorVisible);
+  const toggleContextEditor = useUIStore((state) => state.toggleContextEditor);
+  const openNewContextBrowserTab = useUIStore((state) => state.openNewContextBrowserTab);
+  const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
   const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  // Agent actions that name no tab go to the browser tab the user last had in front of them.
+  const shownBrowserTabId = activeTab?.mode === 'browser' ? activeTab.id : null;
+  React.useEffect(() => {
+    if (shownBrowserTabId) setShownBrowserTab(shownBrowserTabId);
+  }, [shownBrowserTabId]);
   const isOpen = Boolean(panelState?.isOpen && activeTab);
-  const isExpanded = Boolean(isOpen && panelState?.expanded);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
+  const hasOpenEditorFile = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
+    [tabs],
+  );
+  // The editor column is shown for an open file unless the user hid it; the
+  // tree never hides alongside it, so a hidden tree forces the editor back.
+  const showsEditor = hasOpenEditorFile && (contextEditorVisible || !contextEditorTreeVisible);
   const activeModeForWidth = activeTab?.mode ?? null;
+  const isTreeOnly = activeModeForWidth === 'file' && !showsEditor;
+  const isExpanded = Boolean(isOpen && panelState?.expanded && !isTreeOnly);
   const manualWidth = activeModeForWidth ? panelState?.widthByMode?.[activeModeForWidth] : undefined;
+  const manualWidthFraction = activeModeForWidth ? panelState?.widthFractionByMode?.[activeModeForWidth] : undefined;
   const widthFraction = activeModeForWidth ? getContextSurfaceWidthFraction(activeModeForWidth) : 0.5;
   const widthFallbackBase = availablePanelAreaWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : CONTEXT_PANEL_DEFAULT_WIDTH * 2);
-  const width = clampWidth(manualWidth ?? Math.round(widthFraction * widthFallbackBase));
+  const effectiveManualWidth = manualWidthFraction != null && availablePanelAreaWidth != null
+    ? Math.round(manualWidthFraction * availablePanelAreaWidth)
+    : manualWidth;
+  const width = isTreeOnly
+    ? contextEditorTreeWidth
+    : clampWidth(effectiveManualWidth ?? Math.round(widthFraction * widthFallbackBase), maxPanelWidth(availablePanelAreaWidth ?? widthFallbackBase));
+
+  // Convert legacy pixel-only preferences to a ratio the first time the
+  // available area is known, so existing users also get responsive sizing.
+  React.useEffect(() => {
+    if (!directoryKey || !activeModeForWidth || isTreeOnly || manualWidthFraction != null || manualWidth == null || availablePanelAreaWidth == null) return;
+    setContextPanelWidth(directoryKey, activeModeForWidth, manualWidth, availablePanelAreaWidth);
+  }, [activeModeForWidth, availablePanelAreaWidth, directoryKey, isTreeOnly, manualWidth, manualWidthFraction, setContextPanelWidth]);
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
     for (const tab of tabs) {
@@ -2269,8 +634,7 @@ export const ContextPanel: React.FC = () => {
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
 
-  // Tracks the panel area width so fraction-based surface defaults stay
-  // proportional as the window resizes; manual widths remain fixed px.
+  // Defaults and manually resized surfaces track the same available area.
   React.useLayoutEffect(() => {
     const parent = panelRef.current?.parentElement;
     if (!parent || typeof ResizeObserver === 'undefined') {
@@ -2327,10 +691,10 @@ export const ContextPanel: React.FC = () => {
   }, []);
 
   const clampWidthForDrag = React.useCallback((nextWidth: number) => {
-    const clamped = clampWidth(nextWidth);
     const available = resizeAvailableWidthRef.current;
+    const clamped = isTreeOnly ? clampContextEditorTreeWidth(nextWidth) : clampWidth(nextWidth, maxPanelWidth(available));
     return available === null ? clamped : Math.min(clamped, Math.max(1, available));
-  }, []);
+  }, [isTreeOnly]);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
     if (!isOpen || isExpanded || !directoryKey) {
@@ -2352,6 +716,7 @@ export const ContextPanel: React.FC = () => {
     // Apply the final width once, letting the regular 200ms width transition
     // carry the panel to the release position.
     const finalWidth = clampWidthForDrag(resizingWidthRef.current ?? width);
+    const availableWidth = resizeAvailableWidthRef.current;
     resizingWidthRef.current = null;
     resizeAvailableWidthRef.current = null;
     if (resizeFollowTimerRef.current !== null) {
@@ -2359,12 +724,14 @@ export const ContextPanel: React.FC = () => {
       resizeFollowTimerRef.current = null;
     }
     document.documentElement.style.cursor = '';
-    if (directoryKey && activeModeForWidth) {
-      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth);
+    if (isTreeOnly) {
+      setContextEditorTreeWidth(finalWidth);
+    } else if (directoryKey && activeModeForWidth) {
+      setContextPanelWidth(directoryKey, activeModeForWidth, finalWidth, availableWidth ?? undefined);
     }
     setIsResizing(false);
     activeResizePointerIDRef.current = null;
-  }, [activeModeForWidth, clampWidthForDrag, directoryKey, setContextPanelWidth, width]);
+  }, [activeModeForWidth, clampWidthForDrag, directoryKey, isTreeOnly, setContextEditorTreeWidth, setContextPanelWidth, width]);
 
   // Window-level drag listeners: tracking the pointer via the 3px handle and
   // pointer capture is unreliable (capture can fail over iframes and a missed
@@ -2439,6 +806,29 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
+    // Portalled menus and dialogs own Escape even though their React events
+    // still pass through this panel's capture handler.
+    if (event.target instanceof Node && !event.currentTarget.contains(event.target)) {
+      return;
+    }
+
+    // Terminal owns Escape so the PTY receives it (e.g. Vim Normal mode).
+    // The terminal input listens in the bubble phase; stopping capture here
+    // would swallow the key before the terminal ever sees it (issue #2644).
+    if (isTerminalEventTarget(event.target)) {
+      return;
+    }
+    // Same for the file editor and what it opens over itself (search, the
+    // symbol list, go to line): Escape closes those, leaves Vim's INSERT mode
+    // or collapses several cursors, and must not close the whole panel.
+    if (isEditorEventTarget(event.target)) {
+      return;
+    }
+    // Something under the panel already handled this Escape.
+    if (event.defaultPrevented) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     handleClose();
@@ -2456,8 +846,13 @@ export const ContextPanel: React.FC = () => {
 
   }, [activeTab, directoryKey, setSelectedFilePath]);
 
-  const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
-  const activeChatSessionID = activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+  const chatTabs = React.useMemo(
+    () => tabs.filter((tab) => tab.mode === 'chat'),
+    [tabs],
+  );
+  const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
+  const activeChatSessionID = isOpen && activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
+  const activeChatTab = getActiveEmbeddedSessionChatTab(chatTabs, activeChatTabID);
 
   React.useEffect(() => {
     if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
@@ -2495,8 +890,12 @@ export const ContextPanel: React.FC = () => {
       lightThemeId,
       darkThemeId,
       currentTheme,
-    });
-  }, [currentTheme, darkThemeId, directoryKey, lightThemeId, themeMode]);
+    }, { allowPromptingSubagentSessions });
+  }, [allowPromptingSubagentSessions, currentTheme, darkThemeId, directoryKey, lightThemeId, themeMode]);
+
+  const activeChatSrc = activeChatTab && activeChatSessionID
+    ? getEmbeddedChatSrc(activeChatTab.id, activeChatSessionID, activeChatTab.readOnly)
+    : null;
 
   React.useEffect(() => {
     const liveTabIDs = new Set(tabs.map((tab) => tab.id));
@@ -2538,19 +937,6 @@ export const ContextPanel: React.FC = () => {
         continue;
       }
 
-      const directThemeSync = (frameWindow as unknown as {
-        __openchamberApplyThemeSync?: (themePayload: typeof payload) => void;
-      }).__openchamberApplyThemeSync;
-
-      if (typeof directThemeSync === 'function') {
-        try {
-          directThemeSync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
       frameWindow.postMessage(
         {
           type: 'openchamber:theme-sync',
@@ -2569,21 +955,28 @@ export const ContextPanel: React.FC = () => {
       const frameWindow = frame.contentWindow;
       if (!frameWindow) continue;
 
-      const directSync = (frameWindow as unknown as {
-        __openchamberApplyChatSettingsSync?: (settings: typeof payload) => void;
-      }).__openchamberApplyChatSettingsSync;
-      if (typeof directSync === 'function') {
-        try {
-          directSync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
       frameWindow.postMessage({ type: 'openchamber:chat-settings-sync', payload }, window.location.origin);
     }
   }, [allowPromptingSubagentSessions]);
+
+  const postEmbeddedVisibilityToChat = React.useCallback((
+    tabID: string,
+    frame: HTMLIFrameElement,
+    targetOrigin: string,
+  ) => {
+    const frameWindow = frame.contentWindow;
+    if (!frameWindow) {
+      return;
+    }
+
+    frameWindow.postMessage(
+      {
+        type: EMBEDDED_VISIBILITY_UPDATE,
+        payload: { visible: activeChatTabID === tabID },
+      },
+      targetOrigin,
+    );
+  }, [activeChatTabID]);
 
   const postEmbeddedVisibilityToChats = React.useCallback(() => {
     if (typeof window === 'undefined') {
@@ -2591,34 +984,9 @@ export const ContextPanel: React.FC = () => {
     }
 
     for (const [tabID, frame] of chatFrameRefs.current.entries()) {
-      const frameWindow = frame.contentWindow;
-      if (!frameWindow) {
-        continue;
-      }
-
-      const payload = { visible: activeChatTabID === tabID };
-      const directVisibilitySync = (frameWindow as unknown as {
-        __openchamberSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
-      }).__openchamberSetEmbeddedVisibility;
-
-      if (typeof directVisibilitySync === 'function') {
-        try {
-          directVisibilitySync(payload);
-          continue;
-        } catch {
-          // fallback to postMessage below
-        }
-      }
-
-      frameWindow.postMessage(
-        {
-          type: 'openchamber:embedded-visibility',
-          payload,
-        },
-        window.location.origin,
-      );
+      postEmbeddedVisibilityToChat(tabID, frame, window.location.origin);
     }
-  }, [activeChatTabID]);
+  }, [postEmbeddedVisibilityToChat]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2630,13 +998,38 @@ export const ContextPanel: React.FC = () => {
         return;
       }
 
-      const isKnownChatFrame = Array.from(chatFrameRefs.current.values())
-        .some((frame) => frame.contentWindow === event.source);
-      if (!isKnownChatFrame) {
+      const sourceChatFrame = Array.from(chatFrameRefs.current.entries())
+        .find(([, frame]) => frame.contentWindow === event.source);
+      if (!sourceChatFrame) {
         return;
       }
 
-      const data = event.data as { type?: unknown };
+      const data = event.data as { type?: unknown; requestId?: unknown };
+      if (data?.type === EMBEDDED_VISIBILITY_REQUEST) {
+        const [tabID, frame] = sourceChatFrame;
+        postEmbeddedVisibilityToChat(tabID, frame, event.origin);
+        return;
+      }
+      if (data?.type === EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST) {
+        if (typeof data.requestId !== 'string' || !data.requestId) return;
+        const runtimeKey = getRuntimeKey();
+        const payload: EmbeddedSessionRuntimeBootstrap = {
+          apiBaseUrl: getRuntimeApiBaseUrl(),
+          clientToken: getRuntimeBearerTokenSync(),
+          localOrigin: typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string'
+            ? window.__OPENCHAMBER_LOCAL_ORIGIN__
+            : '',
+          runtimeHeaders: getRuntimeExtraHeadersSync(),
+          relayHostId: runtimeKey.startsWith('host:') ? runtimeKey.slice('host:'.length) : '',
+          relay: getActiveRelayDescriptor() ?? undefined,
+        };
+        (event.source as WindowProxy | null)?.postMessage({
+          type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
+          requestId: data.requestId,
+          payload,
+        }, event.origin);
+        return;
+      }
       if (data?.type === 'openchamber:theme-sync-request') {
         postThemeSyncToEmbeddedChat();
         return;
@@ -2657,7 +1050,7 @@ export const ContextPanel: React.FC = () => {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [postChatSettingsSyncToEmbeddedChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
+  }, [postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
 
   React.useLayoutEffect(() => {
     const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
@@ -2672,8 +1065,8 @@ export const ContextPanel: React.FC = () => {
 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
-  // preview targets).
-  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview';
+  // browser targets).
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'browser';
   const activeModeTabs = React.useMemo(
     () => (activeTab ? tabs.filter((tab) => tab.mode === activeTab.mode) : []),
     [activeTab, tabs],
@@ -2686,62 +1079,142 @@ export const ContextPanel: React.FC = () => {
     return {
       id: tab.id,
       label,
-      icon: getTabIcon(tab),
+      icon: getTabIcon(tab, faviconByOrigin),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
+      preview: tab.preview,
     };
-  }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
+  }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'git'
-            ? <GitView isActive={isOpen} />
+            ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
                 ? <PullRequestView />
+            : activeTab?.mode === 'linear'
+                ? <React.Suspense fallback={null}><LinearIssuesView /></React.Suspense>
             : activeTab?.mode === 'notes'
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
-            ? <PlanView targetPath={activeTab.targetPath} />
-            : activeTab?.mode === 'preview'
-                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
-                : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                    <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
-                    <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
-                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
-                  </div>
-                );
+            ? <React.Suspense fallback={null}><PlanView
+                targetPath={activeTab.targetPath}
+                savedProjectPlan={activeTab.projectPlanId && activeTab.projectPlanRef
+                  ? { projectRef: activeTab.projectPlanRef, planId: activeTab.projectPlanId }
+                  : null}
+              /></React.Suspense>
+            : null;
 
-  const chatTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'chat'),
-    [tabs],
-  );
   const browserTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'browser'),
     [tabs],
   );
+  const visibleBrowserTabId = isOpen && activeTab?.mode === 'browser' ? activeTab.id : null;
+  React.useEffect(() => {
+    if (visibleBrowserTabId) wakeBrowserTab(visibleBrowserTabId);
+  }, [visibleBrowserTabId, wakeBrowserTab]);
+  const loadedBrowserTabs = React.useMemo(
+    () => browserTabs.filter((tab) => tab.id === visibleBrowserTabId || wokenBrowserTabIds.has(tab.id)),
+    [browserTabs, visibleBrowserTabId, wokenBrowserTabIds],
+  );
+  React.useEffect(() => {
+    // Only a Chromium host mounts views that agents can drive, so only it may
+    // offer to wake a tab; anywhere else a claimed action could never run.
+    if (!window.__OPENCHAMBER_ELECTRON__) return;
+    const unregister = browserTabs
+      .filter((tab) => !loadedBrowserTabs.includes(tab))
+      .map((tab) => registerSleepingBrowserTab({
+        tabId: tab.id,
+        describe: () => ({ title: '', url: tab.targetPath ?? '' }),
+        wake: () => wakeBrowserTab(tab.id),
+      }));
+    return () => unregister.forEach((release) => release());
+  }, [browserTabs, loadedBrowserTabs, wakeBrowserTab]);
   const diffTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
   );
-  const hasTerminalTab = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'terminal'),
+  const terminalTab = React.useMemo(
+    () => tabs.find((tab) => tab.mode === 'terminal') ?? null,
     [tabs],
   );
-  const BrowserPane = isElectronBrowserRuntime() ? DesktopBrowserPane : IframeBrowserPane;
+  // Keep-alive: the walkthrough holds reading progress and scroll position that
+  // a remount would silently throw away.
+  const hasWalkthroughTab = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'walkthrough'),
+    [tabs],
+  );
+  const pluginTabs = React.useMemo(
+    () => tabs.filter((tab) => isPluginContextPanelMode(tab.mode)),
+    [tabs],
+  );
+  const guests = useGuestsStore((state) => state.guests);
+  const surfaceGuestIds = React.useMemo(
+    () => new Set(guests.filter(guestHasSharedSurface).map((guest) => guest.id)),
+    [guests],
+  );
+  // Surface extensions that also ship a page: it is docked to one edge of the picture.
+  const surfaceDockings = React.useMemo(() => {
+    const dockings = new Map<string, GuestSurfaceDocking>();
+    for (const guest of guests) {
+      const docking = guestSurfaceDocking(guest);
+      if (docking) dockings.set(guest.id, docking);
+    }
+    return dockings;
+  }, [guests]);
   const hasFileTabs = React.useMemo(
     () => tabs.some((tab) => tab.mode === 'file'),
-    [tabs],
-  );
-  const hasOpenEditorFile = React.useMemo(
-    () => tabs.some((tab) => tab.mode === 'file' && tab.targetPath),
     [tabs],
   );
 
   const isFileTabActive = activeTab?.mode === 'file';
 
+  const closeContextPanelTabs = useUIStore((state) => state.closeContextPanelTabs);
+  const renderTabContextMenu = React.useCallback(
+    (args: { id: string; index: number; allIds: string[]; close: () => void }): React.ReactNode => {
+      if (!directoryKey) {
+        return null;
+      }
+      const { id, index, allIds, close } = args;
+      const closeOthers = () => closeContextPanelTabs(directoryKey, allIds.filter((tabId) => tabId !== id));
+      const closeToLeft = () => closeContextPanelTabs(directoryKey, allIds.slice(0, index));
+      const closeToRight = () => closeContextPanelTabs(directoryKey, allIds.slice(index + 1));
+      const closeAll = () => closeContextPanelTabs(directoryKey, allIds);
+      const hasOthers = allIds.length > 1;
+      const isFirst = index === 0;
+      const isLast = index === allIds.length - 1;
+      return (
+        <>
+          <ContextMenuItem onClick={close}>
+            <Icon name="close" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.close')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={closeOthers} disabled={!hasOthers}>
+            <Icon name="expand-horizontal" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeOthers')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={closeToLeft} disabled={isFirst}>
+            <Icon name="expand-left" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeToLeft')}
+          </ContextMenuItem>
+          <ContextMenuItem onClick={closeToRight} disabled={isLast}>
+            <Icon name="expand-right" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeToRight')}
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={closeAll} disabled={!hasOthers}>
+            <Icon name="close-circle" className="mr-2 size-4" />
+            {t('contextPanel.tab.menu.closeAll')}
+          </ContextMenuItem>
+        </>
+      );
+    },
+    [closeContextPanelTabs, directoryKey, t],
+  );
+
   const header = (
-    <header className="flex h-10 items-stretch border-b border-border/40">
+    <header className="flex h-10 items-stretch border-b border-border">
       {isMultiInstanceMode ? (
         <SortableTabsStrip
           items={tabItems}
@@ -2764,18 +1237,52 @@ export const ContextPanel: React.FC = () => {
             }
             reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
           }}
+          onDoubleClickTab={(tabID) => {
+            if (directoryKey) pinContextPanelTab(directoryKey, tabID);
+          }}
           layoutMode="scrollable"
           variant="default"
+          tabContextMenu={renderTabContextMenu}
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-          {activeTab ? getTabIcon(activeTab) : null}
+          {activeTab ? getTabIcon(activeTab, faviconByOrigin) : null}
           <span className="truncate typography-ui-label text-foreground">
             {activeTab ? getModeLabel(activeTab.mode, t) : null}
           </span>
         </div>
       )}
       <div className="flex items-center gap-1 px-1.5">
+        {activeTab?.mode === 'browser' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (!directoryKey) return;
+              openNewContextBrowserTab(directoryKey);
+            }}
+            className="h-7 w-7 p-0"
+            title={t('contextPanel.browser.newTab')}
+            aria-label={t('contextPanel.browser.newTab')}
+          >
+            <Icon name="add" className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
+        {isFileTabActive && hasOpenEditorFile ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={toggleContextEditor}
+            className="h-7 w-7 p-0"
+            title={t('contextRail.editor.toggle')}
+            aria-label={t('contextRail.editor.toggle')}
+            aria-pressed={showsEditor}
+          >
+            <Icon name="layout-left" className="h-3.5 w-3.5" />
+          </Button>
+        ) : null}
         {isFileTabActive ? (
           <Button
             type="button"
@@ -2790,17 +1297,19 @@ export const ContextPanel: React.FC = () => {
             <Icon name="layout-right" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleToggleExpanded}
-          className="h-7 w-7 p-0"
-          title={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
-          aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
-        >
-          {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
-        </Button>
+        {!isTreeOnly ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleExpanded}
+            className="h-7 w-7 p-0"
+            title={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
+            aria-label={isExpanded ? t('contextPanel.actions.collapsePanel') : t('contextPanel.actions.expandPanel')}
+          >
+            {isExpanded ? <Icon name="fullscreen-exit" className="h-3.5 w-3.5" /> : <Icon name="fullscreen" className="h-3.5 w-3.5" />}
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"
@@ -2865,11 +1374,11 @@ export const ContextPanel: React.FC = () => {
           content box only while collapsed, shifting the header controls by
           1px between the collapsed and expanded states. */}
       {isOpen && !isExpanded && (
-        <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border/40" />
+        <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" />
       )}
       {/* Divider between the panel and the icon rail on its right. */}
       {isOpen && (
-        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border/40" />
+        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
       {!isExpanded && (
         <div
@@ -2905,62 +1414,53 @@ export const ContextPanel: React.FC = () => {
       <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
         {hasFileTabs ? (
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
-            <div className="h-full min-w-0 flex-1">
-              {hasOpenEditorFile ? (
-                <FilesView mode="editor-only" />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                  <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
-                  <div className="typography-ui-header text-foreground">{t('contextPanel.editorEmpty.title')}</div>
-                  <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.editorEmpty.description')}</div>
-                </div>
-              )}
-            </div>
-            <EditorTreeColumn visible={contextEditorTreeVisible} />
+            {hasOpenEditorFile || !contextEditorTreeVisible ? (
+              // Hidden rather than unmounted so a hidden editor keeps its state.
+              <div className={cn('h-full min-w-0 flex-1', hasOpenEditorFile && !showsEditor && 'hidden')}>
+                {hasOpenEditorFile ? (
+                  <React.Suspense fallback={null}><FilesView mode="editor-only" visible={isOpen && isFileTabActive && showsEditor} /></React.Suspense>
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+                    <Icon name="file-code" className="h-12 w-12 text-muted-foreground/50" />
+                    <div className="typography-ui-header text-foreground">{t('contextPanel.editorEmpty.title')}</div>
+                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.editorEmpty.description')}</div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+            <EditorTreeColumn visible={contextEditorTreeVisible} active={isOpen && isFileTabActive} fill={!showsEditor} />
           </div>
         ) : null}
-        {chatTabs.map((tab) => {
-          const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
-          if (!sessionID) {
-            return null;
-          }
-
-          const src = getEmbeddedChatSrc(tab.id, sessionID, tab.readOnly);
-          if (!src) {
-            return null;
-          }
-
-          return (
-            <iframe
-              key={tab.id}
-              ref={(node) => {
-                if (!node) {
-                  chatFrameRefs.current.delete(tab.id);
-                  return;
-                }
-                chatFrameRefs.current.set(tab.id, node);
-              }}
-              src={src}
-              title={t('contextPanel.iframe.sessionChatTitle', { sessionID })}
-              className={cn(
-                'absolute inset-0 h-full w-full border-0 bg-background',
-                activeChatTabID === tab.id ? 'block' : 'hidden'
-              )}
-              onLoad={() => {
-                postThemeSyncToEmbeddedChat();
-                postChatSettingsSyncToEmbeddedChat();
-                postEmbeddedVisibilityToChats();
-              }}
-            />
-          );
-        })}
-        {browserTabs.map((tab) => (
+        {activeChatTab && activeChatSessionID && activeChatSrc ? (
+          <iframe
+            key={activeChatTab.id}
+            ref={(node) => {
+              if (!node) {
+                chatFrameRefs.current.delete(activeChatTab.id);
+                return;
+              }
+              chatFrameRefs.current.set(activeChatTab.id, node);
+            }}
+            src={activeChatSrc}
+            title={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
+            className="absolute inset-0 h-full w-full border-0 bg-background"
+            onLoad={() => {
+              postThemeSyncToEmbeddedChat();
+              postChatSettingsSyncToEmbeddedChat();
+              postEmbeddedVisibilityToChats();
+            }}
+          />
+        ) : null}
+        {loadedBrowserTabs.map((tab) => (
           <div
             key={tab.id}
+            // Invisible rather than display:none, so a background tab the agent
+            // is working keeps its layout and its snapshots read a real page.
             className={cn(
               'absolute inset-0',
-              activeTab?.id !== tab.id && 'hidden'
+              activeTab?.id !== tab.id && 'invisible pointer-events-none'
             )}
+            aria-hidden={activeTab?.id !== tab.id || undefined}
           >
             <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
           </div>
@@ -2973,24 +1473,73 @@ export const ContextPanel: React.FC = () => {
               activeTab?.id !== tab.id && 'hidden'
             )}
           >
-            <DiffView
-              hideStackedFileSidebar
-              stackedDefaultCollapsedAll
-              pinSelectedFileHeaderToTopOnNavigate
-              showOpenInEditorAction
-              diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
-              onDiffScopeChange={handleDiffScopeChange}
-              targetFilePath={tab.targetPath}
-              flushContent
-            />
+            <React.Suspense fallback={null}>
+              <DiffView
+                visible={isOpen && activeTab?.id === tab.id}
+                hideStackedFileSidebar
+                stackedDefaultCollapsedAll
+                pinSelectedFileHeaderToTopOnNavigate
+                showOpenInEditorAction
+                diffScope={tab.diffScope ?? (tab.stagedDiff ? 'staged' : 'working')}
+                onDiffScopeChange={handleDiffScopeChange}
+                targetFilePath={tab.targetPath}
+                flushContent
+              />
+            </React.Suspense>
           </div>
         ))}
-        {hasTerminalTab ? (
+        {terminalTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
-            <TerminalView visible={isOpen && activeTab?.mode === 'terminal'} />
+            <TerminalView
+              visible={isOpen && activeTab?.mode === 'terminal'}
+              directory={terminalTab.targetDirectory}
+              onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
+            />
           </div>
         ) : null}
-        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' ? activeNonChatContent : null}
+        {hasWalkthroughTab ? (
+          <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
+            <React.Suspense fallback={null}>
+              <WalkthroughView directory={effectiveDirectory} visible={isOpen && activeTab?.mode === 'walkthrough'} />
+            </React.Suspense>
+          </div>
+        ) : null}
+        {pluginTabs.map((tab) => {
+          if (!isPluginContextPanelMode(tab.mode)) return null;
+          // A shared-surface extension's picture is drawn by the host and
+          // mounted only while shown, so an unwatched surface holds no socket
+          // and its service can idle out. Its own page, when it has one, is
+          // docked to one edge of the picture and stays mounted like any
+          // panel iframe.
+          const guestId = pluginIdFromMode(tab.mode);
+          const sharedSurface = surfaceGuestIds.has(guestId);
+          const docking = surfaceDockings.get(guestId);
+          const shown = activeTab?.id === tab.id;
+          const surfaceMounted = shown && isOpen;
+          if (sharedSurface && !docking && !surfaceMounted) return null;
+          return (
+            <div
+              key={tab.id}
+              className={cn('absolute inset-0', shown ? 'block' : 'hidden')}
+            >
+              <React.Suspense fallback={null}>
+                {!sharedSurface ? (
+                  <PluginPane mode={tab.mode} />
+                ) : !docking ? (
+                  <GuestSurfacePane mode={tab.mode} />
+                ) : (
+                  <div className={cn('flex h-full', DOCK_LAYOUT[docking.dock].container)}>
+                    <DockedGuestPage mode={tab.mode} docking={docking} />
+                    <div className="min-h-0 min-w-0 flex-1">
+                      {surfaceMounted ? <GuestSurfacePane mode={tab.mode} /> : null}
+                    </div>
+                  </div>
+                )}
+              </React.Suspense>
+            </div>
+          );
+        })}
+        {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' && activeTab?.mode !== 'walkthrough' && !(activeTab && isPluginContextPanelMode(activeTab.mode)) ? activeNonChatContent : null}
       </div>
       </div>
     </aside>

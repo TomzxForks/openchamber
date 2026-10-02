@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -7,23 +7,42 @@ import {
   toNumber,
   toTimestamp,
   durationToLabel,
-  durationToSeconds
+  durationToSeconds,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
-const aliases = ['kimi-for-coding', 'kimi'];
+// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
+// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
+// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
+// key left behind with a dead credential must not shadow it. The global plan
+// stays last, as before, since its key is not known to work at that address.
+export const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
-export const isConfigured = () => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.key || entry?.token);
+// Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
+// blocks report `remaining` instead. Neither field is guaranteed present, so
+// derive usedPercent from whichever one the API actually returned.
+const computeUsedPercent = (total, used, remaining) => {
+  if (!total) return null;
+  if (used !== null) {
+    return Math.max(0, Math.min(100, (used / total) * 100));
+  }
+  if (remaining !== null) {
+    return Math.max(0, Math.min(100, 100 - (remaining / total) * 100));
+  }
+  return null;
 };
 
-export const fetchQuota = async () => {
-  const auth = readAuthFile();
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const apiKey = entry?.key ?? entry?.token;
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
+
+export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch } = {}) => {
+  const apiKey = getApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -36,7 +55,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://api.kimi.com/coding/v1/usages', {
+    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -59,10 +78,9 @@ export const fetchQuota = async () => {
     const usage = payload?.usage ?? null;
     if (usage) {
       const limit = toNumber(usage.limit);
+      const used = toNumber(usage.used);
       const remaining = toNumber(usage.remaining);
-      const usedPercent = limit && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / limit) * 100))
-        : null;
+      const usedPercent = computeUsedPercent(limit, used, remaining);
       windows.weekly = toUsageWindow({
         usedPercent,
         windowSeconds: null,
@@ -78,10 +96,9 @@ export const fetchQuota = async () => {
       const windowSeconds = durationToSeconds(window?.duration, window?.timeUnit);
       const label = windowSeconds === 5 * 60 * 60 ? `Rate Limit (${rawLabel})` : rawLabel;
       const total = toNumber(detail?.limit);
+      const used = toNumber(detail?.used);
       const remaining = toNumber(detail?.remaining);
-      const usedPercent = total && remaining !== null
-        ? Math.max(0, Math.min(100, 100 - (remaining / total) * 100))
-        : null;
+      const usedPercent = computeUsedPercent(total, used, remaining);
       windows[label] = toUsageWindow({
         usedPercent,
         windowSeconds,

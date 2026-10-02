@@ -1,6 +1,6 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import {
   createAgent,
@@ -10,7 +10,10 @@ import {
   deleteCommand,
   deleteSnippet,
   getAgentSources,
+  getAgentConfig,
+  getAgentPermissions,
   getCommandSources,
+  getCommandConfig,
   getSnippet,
   updateAgent,
   updateCommand,
@@ -25,6 +28,8 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  renameSkill,
+  isManagedSkillPath,
   readSkillSupportingFile,
   writeSkillSupportingFile,
   deleteSkillSupportingFile,
@@ -48,14 +53,19 @@ import {
   updateMcpConfig,
   deleteMcpConfig,
   expandSnippets,
+  setWebSearchSelection,
+  setWarmingEnabled,
+  getWebSearchSource,
   type SnippetScope,
 } from './opencodeConfig';
+import { parseWebSearchSelection } from './opencode-config-v2';
 import {
   getSkillsCatalog,
   scanSkillsRepository as scanSkillsRepositoryFromGit,
   installSkillsFromRepository as installSkillsFromGit,
   type SkillsCatalogSourceConfig,
 } from './skillsCatalog';
+import { buildAppliedResponse } from './config-mutation-response';
 import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
@@ -75,7 +85,7 @@ type ConfigRuntimeDeps = {
   clientReloadDelayMs: number;
 };
 
-const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
 const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
 const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => (
@@ -84,31 +94,9 @@ const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: str
     : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath)
 );
 
-const pluginMutationPayload = async (
-  ctx: BridgeContext | undefined,
-  deps: ConfigRuntimeDeps,
-  label: string,
-) => {
-  try {
-    await ctx?.manager?.restart();
-    return {
-      success: true,
-      requiresReload: true,
-      message: `${label}. Reloading interface…`,
-      reloadDelayMs: deps.clientReloadDelayMs,
-      reloadFailed: false,
-    };
-  } catch (error) {
-    return {
-      success: true,
-      requiresReload: false,
-      message: `${label}, but OpenCode reload failed.`,
-      reloadDelayMs: deps.clientReloadDelayMs,
-      reloadFailed: true,
-      warning: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
+const pluginMutationPayload = (label: string) => buildAppliedResponse(
+  `${label}.`,
+);
 
 const parseSkillsCatalogSources = (settings: Record<string, unknown>): SkillsCatalogSourceConfig[] => {
   const rawCatalogs = (settings as { skillCatalogs?: unknown }).skillCatalogs;
@@ -205,10 +193,10 @@ export async function handleConfigBridgeMessage(
     case 'api:behavior/agents-md:get': {
       try {
         const content = await fs.promises.readFile(AGENTS_MD_PATH, 'utf8');
-        return { id, type, success: true, data: { content, exists: true } };
+        return { id, type, success: true, data: { content, exists: true, path: AGENTS_MD_PATH } };
       } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-          return { id, type, success: true, data: { content: '', exists: false } };
+          return { id, type, success: true, data: { content: '', exists: false, path: AGENTS_MD_PATH } };
         }
         throw error;
       }
@@ -222,8 +210,12 @@ export async function handleConfigBridgeMessage(
       }
       await fs.promises.mkdir(path.dirname(AGENTS_MD_PATH), { recursive: true });
       await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
-      await ctx?.manager?.restart();
-      return { id, type, success: true, data: { success: true } };
+      return {
+        id,
+        type,
+        success: true,
+        data: buildAppliedResponse('AGENTS.md saved.'),
+      };
     }
 
     case 'api:magic-prompts:get': {
@@ -264,11 +256,13 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/agents': {
-      const { method, name, body, directory } = (payload || {}) as {
+      const { method, name, body, directory, resource } = (payload || {}) as {
         method?: string;
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
+        /** `config` or `permissions`, mirroring the web sub-routes. */
+        resource?: string;
       };
       const agentName = typeof name === 'string' ? name.trim() : '';
       if (!agentName) {
@@ -279,6 +273,14 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
+        // Mirrors the web routes: `/config` answers the canonical v2 entity and
+        // `/permissions` the effective rule list.
+        if (resource === 'config') {
+          return { id, type, success: true, data: getAgentConfig(agentName, workingDirectory) };
+        }
+        if (resource === 'permissions') {
+          return { id, type, success: true, data: getAgentPermissions(agentName, workingDirectory) };
+        }
         const sources = getAgentSources(agentName, workingDirectory);
         const scope = sources.md.exists
           ? sources.md.scope
@@ -294,34 +296,22 @@ export async function handleConfigBridgeMessage(
       if (normalizedMethod === 'POST') {
         const scopeValue = body?.scope as string | undefined;
         const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
-        createAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
+        const created = createAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Agent ${agentName} created successfully.`, created),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
-        updateAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
+        const updated = updateAgent(agentName, (body || {}) as Record<string, unknown>, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Agent ${agentName} updated successfully.`, updated),
         };
       }
 
@@ -329,17 +319,11 @@ export async function handleConfigBridgeMessage(
         const scopeValue = body?.scope as string | undefined;
         const scope: AgentScope | undefined = scopeValue === 'project' ? AGENT_SCOPE.PROJECT : scopeValue === 'user' ? AGENT_SCOPE.USER : undefined;
         deleteAgent(agentName, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Agent ${agentName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Agent ${agentName} deleted successfully.`),
         };
       }
 
@@ -347,11 +331,13 @@ export async function handleConfigBridgeMessage(
     }
 
     case 'api:config/commands': {
-      const { method, name, body, directory } = (payload || {}) as {
+      const { method, name, body, directory, resource } = (payload || {}) as {
         method?: string;
         name?: string;
         body?: Record<string, unknown>;
         directory?: string;
+        /** `config`, mirroring the web sub-route. */
+        resource?: string;
       };
       const commandName = typeof name === 'string' ? name.trim() : '';
       if (!commandName) {
@@ -362,6 +348,9 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (normalizedMethod === 'GET') {
+        if (resource === 'config') {
+          return { id, type, success: true, data: getCommandConfig(commandName, workingDirectory) };
+        }
         const sources = getCommandSources(commandName, workingDirectory);
         const scope = sources.md.exists
           ? sources.md.scope
@@ -378,53 +367,63 @@ export async function handleConfigBridgeMessage(
         const scopeValue = body?.scope as string | undefined;
         const scope: CommandScope | undefined = scopeValue === 'project' ? COMMAND_SCOPE.PROJECT : scopeValue === 'user' ? COMMAND_SCOPE.USER : undefined;
         createCommand(commandName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Command ${commandName} created successfully.`),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
         updateCommand(commandName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Command ${commandName} updated successfully.`),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
         deleteCommand(commandName, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Command ${commandName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Command ${commandName} deleted successfully.`),
         };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    // GET/PUT /api/config/websearch — see the web routes in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/websearch': {
+      // SAFETY: every field is checked before use: `method` against a literal,
+      // `directory` by resolveWorkingDirectory, `selection` by parseWebSearchSelection.
+      const body = (payload || {}) as { method?: string; directory?: string; selection?: unknown };
+      if (body.method === 'GET') {
+        return { id, type, success: true, data: getWebSearchSource(resolveWorkingDirectory(ctx, body.directory)) };
+      }
+      const selection = parseWebSearchSelection(body.selection);
+      if (selection === undefined) {
+        return { id, type, success: false, error: 'selection must be false, null, "random" or a provider id' };
+      }
+      const result = setWebSearchSelection(selection);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
+    }
+
+    // PUT /api/config/warming — see the web route in
+    // packages/web/server/lib/opencode/routes.js.
+    case 'api:config/warming': {
+      const enabled = (payload as { enabled?: unknown } | undefined)?.enabled;
+      if (typeof enabled !== 'boolean') {
+        return { id, type, success: false, error: 'enabled must be a boolean' };
+      }
+      const result = setWarmingEnabled(enabled);
+      return { id, type, success: true, data: { success: true, changed: result.changed } };
     }
 
     case 'api:config/mcp': {
@@ -457,50 +456,32 @@ export async function handleConfigBridgeMessage(
 
       if (normalizedMethod === 'POST') {
         const scope = body?.scope as 'user' | 'project' | undefined;
-        createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
+        const created = createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" created. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`MCP server "${mcpName}" created.`, created),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
-        updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
+        const updated = updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" updated. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`MCP server "${mcpName}" updated.`, updated),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
-        deleteMcpConfig(mcpName, workingDirectory);
-        await ctx?.manager?.restart();
+        const deleted = deleteMcpConfig(mcpName, workingDirectory);
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `MCP server "${mcpName}" deleted. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`MCP server "${mcpName}" deleted.`, deleted),
         };
       }
 
@@ -562,7 +543,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: await pluginMutationPayload(ctx, deps, 'Plugin entry changed'),
+          data: pluginMutationPayload('Plugin entry changed'),
         };
       }
 
@@ -590,7 +571,7 @@ export async function handleConfigBridgeMessage(
           id,
           type,
           success: true,
-          data: await pluginMutationPayload(ctx, deps, 'Plugin file changed'),
+          data: pluginMutationPayload('Plugin file changed'),
         };
       }
 
@@ -651,8 +632,26 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (!name && normalizedMethod === 'GET') {
-        const skills = await resolveDiscoveredSkills(deps, ctx, workingDirectory);
-        return { id, type, success: true, data: { skills } };
+        // A failed OpenCode list is flagged so the store treats the disk scan as
+        // partial instead of caching it as the complete list (#3921).
+        const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
+        const skills = mergeDiscoveredSkills(openCodeSkills || [], discoverSkills(workingDirectory));
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            ...(openCodeSkills === null ? { openCodeSkillsUnavailable: true } : {}),
+            skills: skills.map((skill) => ({
+              ...skill,
+              renamable: Boolean(
+                skill.path
+                && skill.path !== '<built-in>'
+                && isManagedSkillPath(skill.path, workingDirectory)
+              ),
+            })),
+          },
+        };
       }
 
       const skillName = typeof name === 'string' ? name.trim() : '';
@@ -678,49 +677,49 @@ export async function handleConfigBridgeMessage(
         const scope: SkillScope | undefined = scopeValue === 'project' ? SKILL_SCOPE.PROJECT : scopeValue === 'user' ? SKILL_SCOPE.USER : undefined;
         const normalizedSource = sourceValue === 'agents' ? 'agents' : 'opencode';
         createSkill(skillName, { ...(body || {}), source: normalizedSource } as Record<string, unknown>, workingDirectory, scope);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} created successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Skill ${skillName} created successfully.`),
         };
       }
 
       if (normalizedMethod === 'PATCH') {
+        if (typeof body?.renameTo === 'string') {
+          const newName = body.renameTo.trim();
+          renameSkill(skillName, newName, workingDirectory);
+          await ctx?.manager?.restart();
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              success: true,
+              name: newName,
+              requiresReload: true,
+              message: `Skill renamed to ${newName} successfully. Reloading interface…`,
+              reloadDelayMs: deps.clientReloadDelayMs,
+            },
+          };
+        }
+
         updateSkill(skillName, (body || {}) as Record<string, unknown>, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} updated successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Skill ${skillName} updated successfully.`),
         };
       }
 
       if (normalizedMethod === 'DELETE') {
         deleteSkill(skillName, workingDirectory);
-        await ctx?.manager?.restart();
         return {
           id,
           type,
           success: true,
-          data: {
-            success: true,
-            requiresReload: true,
-            message: `Skill ${skillName} deleted successfully. Reloading interface…`,
-            reloadDelayMs: deps.clientReloadDelayMs,
-          },
+          data: buildAppliedResponse(`Skill ${skillName} deleted successfully.`),
         };
       }
 
@@ -773,11 +772,7 @@ export async function handleConfigBridgeMessage(
       if (data.ok) {
         const installed = data.installed || [];
         const skipped = data.skipped || [];
-        const requiresReload = installed.length > 0;
-
-        if (requiresReload) {
-          await ctx?.manager?.restart();
-        }
+        const installedAny = installed.length > 0;
 
         return {
           id,
@@ -787,9 +782,12 @@ export async function handleConfigBridgeMessage(
             ok: true,
             installed,
             skipped,
-            requiresReload,
-            message: requiresReload ? 'Skills installed successfully. Reloading interface…' : 'No skills were installed',
-            reloadDelayMs: requiresReload ? deps.clientReloadDelayMs : undefined,
+            ...(installedAny
+              ? buildAppliedResponse('Skills installed successfully.')
+              : {
+                requiresReload: false,
+                message: 'No skills were installed',
+              }),
           },
         };
       }

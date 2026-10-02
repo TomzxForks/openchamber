@@ -127,6 +127,78 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
 
+  it('leaves the body of a request alone when told to, for both parsers', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express, skipBodyParsing: (req) => req.path.startsWith('/api/spaces/') });
+    const raw = (req, res) => {
+      // A body a parser read is complete already, and its stream ends no second time.
+      if (req.complete) {
+        res.json({ body: req.body ?? null, raw: '' });
+        return;
+      }
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => res.json({ body: req.body ?? null, raw: Buffer.concat(chunks).toString('utf8') }));
+    };
+    app.post('/api/spaces/abc/form', raw);
+    app.post('/api/spaces/abc/config/snippets/x', raw);
+    app.post('/api/other/form', raw);
+
+    const kept = await request(app).post('/api/spaces/abc/form').type('form').send('a=1&b=2').expect(200);
+    expect(kept.body).toEqual({ body: null, raw: 'a=1&b=2' });
+    const keptJson = await request(app).post('/api/spaces/abc/config/snippets/x').send({ content: 'x' }).expect(200);
+    expect(keptJson.body).toEqual({ body: null, raw: '{"content":"x"}' });
+    // Elsewhere the parsers still run, and a parsed body leaves nothing to read.
+    const parsed = await request(app).post('/api/other/form').type('form').send('a=1&b=2').expect(200);
+    expect(parsed.body).toEqual({ body: { a: '1', b: '2' }, raw: '' });
+  });
+
+  it('should parse JSON bodies for the web search config route', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/config/websearch', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/config/websearch')
+      .send({ selection: 'random' })
+      .expect(200);
+
+    expect(response.body).toEqual({ body: { selection: 'random' } });
+  });
+
+  it('should parse JSON bodies for custom provider upsert routes', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/provider', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/provider')
+      .send({
+        providerID: 'campus-llm',
+        config: {
+          name: 'Campus LLM',
+          options: { baseURL: 'https://llm.example.edu/v1' },
+          models: { fast: { name: 'Fast' } },
+        },
+      })
+      .expect(200);
+
+    expect(response.body).toEqual({
+      body: {
+        providerID: 'campus-llm',
+        config: {
+          name: 'Campus LLM',
+          options: { baseURL: 'https://llm.example.edu/v1' },
+          models: { fast: { name: 'Fast' } },
+        },
+      },
+    });
+  });
+
   it('should require API auth before probing loopback preview URLs', async () => {
     const app = express();
     const originalFetch = globalThis.fetch;
@@ -300,12 +372,42 @@ describe('core-routes', () => {
     });
   });
 
-  it('advertises the caller-supplied serverUrl as the direct candidate over the request origin', async () => {
+  it('advertises the caller-supplied serverUrl first and keeps the request origin as a fallback candidate', async () => {
     const { app } = createPairingRouteApp();
 
     const response = await request(app)
       .post('/api/client-auth/pairing/sessions')
-      .set('Host', 'runtime.example')
+      .set('Host', 'chamber.example.com')
+      .set('X-Forwarded-Proto', 'https')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+      { type: 'tunnel', url: 'https://chamber.example.com', priority: 20 },
+    ]);
+  });
+
+  it('does not duplicate the request origin when it matches the caller-supplied serverUrl', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '192.168.1.20:2606')
+      .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
+      .expect(201);
+
+    expect(response.body.server.candidates).toEqual([
+      { type: 'lan', url: 'http://192.168.1.20:2606', priority: 10 },
+    ]);
+  });
+
+  it('skips a loopback request origin as the fallback candidate', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', '127.0.0.1:2606')
       .send({ label: 'Pair phone', serverUrl: 'http://192.168.1.20:2606' })
       .expect(201);
 
@@ -430,7 +532,7 @@ describe('core-routes', () => {
     expect(dependencies.clientPairingRuntime.redeemPairingSession).toHaveBeenCalledTimes(11);
   });
 
-  it('should let preview proxy credentials reach preview proxy validation', async () => {
+  it('no longer exempts preview-proxy style credentials from API auth', async () => {
     const app = express();
     const requireAuth = vi.fn((_req, res) => res.status(401).type('text/plain').send('Authentication required'));
 
@@ -462,20 +564,18 @@ describe('core-routes', () => {
 
     app.use('/api/preview/proxy', (_req, res) => res.json({ reached: true }));
 
+    // The preview proxy is gone; the token that used to bypass the auth gate
+    // must no longer open a hole for any route that happens to match the path.
     await request(app)
       .get('/api/preview/proxy/abc123/?oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
+      .expect(401, 'Authentication required');
 
     await request(app)
       .get('/api/preview/proxy/abc123/')
       .set('Cookie', 'oc_preview_token=preview-secret')
-      .expect(200, { reached: true });
-
-    await request(app)
-      .get('/api/preview/proxy/abc123/')
       .expect(401, 'Authentication required');
 
-    expect(requireAuth).toHaveBeenCalledTimes(1);
+    expect(requireAuth).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -759,5 +859,47 @@ describe('client auth routes', () => {
       headers: { host: '192.168.1.5:57123' },
       socket: { remoteAddress: '203.0.113.10' },
     })).toBe('unknown-public');
+  });
+
+  it('reports null port and tunnel URL on /api/system/info when no getters are wired', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.openchamberVersion).toBe('1.0.0');
+    expect(response.body.runtime).toBe('test');
+    expect(response.body.pid).toBeTypeOf('number');
+    expect(response.body.startedAt).toBeTypeOf('string');
+    expect(response.body.port).toBeNull();
+    expect(response.body.tunnelUrl).toBeNull();
+  });
+
+  it('reports the instance port and tunnel URL on /api/system/info from the wired getters', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      getServerPort: () => 9988,
+      getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    expect(response.body.port).toBe(9988);
+    expect(response.body.tunnelUrl).toBe('https://worktree-a.example.trycloudflare.com');
   });
 });

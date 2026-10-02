@@ -1,4 +1,4 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 import type { ProjectEntry } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
@@ -70,7 +70,7 @@ const projectLabelForDirectory = (directory: string | null, projects: ProjectEnt
   return basename(directory);
 };
 
-export const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
+const buildMobileWidgetSnapshot = (): MobileWidgetSnapshot => {
   const sessions = useGlobalSessionsStore.getState().activeSessions;
   const unseenBySession = useNotificationStore.getState().index.session.unseenCount;
   const notifyOnSubtasks = useUIStore.getState().notifyOnSubtasks;

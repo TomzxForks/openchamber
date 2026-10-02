@@ -11,6 +11,7 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
 - `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
+- `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 
 ## Public exports
 
@@ -79,6 +80,9 @@ Returns object with:
 
 ### `generateSpeechBuffer`
 Returns Buffer containing MP3 audio data.
+
+## Enterprise mode
+With enterprise mode on (`../enterprise-mode.js`), speech and transcription stay on this machine: `normalizeCustomOpenAIBaseURL` refuses any non-local host whatever `OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS` or the desktop runtime would allow, `/api/tts/speak` without a custom server (OpenAI's cloud) and `/api/voice/token` answer 403, and `/api/tts/status` reports `available: false, enterpriseMode: true` so Settings can say why. macOS `say` and the local dictation models are unaffected.
 
 ## API key resolution
 OpenAI API keys are resolved in order:

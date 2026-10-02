@@ -1,9 +1,10 @@
+import { isSkillTool, toolDescription } from '@/lib/opencode/tools';
 import React from 'react';
+import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { cn } from '@/lib/utils';
 import type { TurnActivityRecord as TurnActivityPart } from '../../lib/turns/types';
-import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
+import type { Metadata, ToolInput, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import type { StreamPhase } from '../types';
-import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 import type { ToolPopupContent } from '../types';
 import ToolPart from './ToolPart';
 import { MinDurationShineText } from './MinDurationShineText';
@@ -14,12 +15,12 @@ import { Icon } from "@/components/icon/Icon";
 import { FadeInOnReveal } from '../FadeInOnReveal';
 import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
+import { useGuestToolPresentation } from '@/lib/guests/tool-presentation';
 import { isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { ensureOutsideFileGrantForDesktop } from '@/lib/outsideFileGrants';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
@@ -39,7 +40,6 @@ interface ProgressiveGroupProps {
     expandedTools: Set<string>;
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     streamPhase: StreamPhase;
     showHeader: boolean;
     animateRows?: boolean;
@@ -143,85 +143,6 @@ const getToolSkillDirectory = (activity: TurnActivityPart): string | null => {
     return typeof dir === 'string' && dir.trim().length > 0 ? dir : null;
 };
 
-const toTodoStatusKey = (value: unknown): 'pending' | 'in_progress' | 'completed' | 'cancelled' | null => {
-    if (typeof value !== 'string') {
-        return null;
-    }
-    const normalized = value.trim().toLowerCase();
-    if (normalized === 'pending') return 'pending';
-    if (normalized === 'in_progress' || normalized === 'in progress' || normalized === 'inprogress') return 'in_progress';
-    if (normalized === 'completed' || normalized === 'done') return 'completed';
-    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
-    return null;
-};
-
-const formatTodoSummary = (todos: unknown[]): string | null => {
-    if (todos.length === 0) {
-        return '0 tasks';
-    }
-
-    let pending = 0;
-    let inProgress = 0;
-    for (const todo of todos) {
-        if (!todo || typeof todo !== 'object') {
-            continue;
-        }
-        const status = toTodoStatusKey((todo as { status?: unknown }).status);
-        if (!status) {
-            continue;
-        }
-        if (status === 'pending') pending += 1;
-        if (status === 'in_progress') inProgress += 1;
-    }
-
-    const activeCount = pending + inProgress;
-    if (activeCount === 0) {
-        return '0 tasks';
-    }
-
-    return `${activeCount} ${activeCount === 1 ? 'task' : 'tasks'}`;
-};
-
-const getTodoSummaryFromActivity = (activity: TurnActivityPart): string | null => {
-    const part = activity.part as ToolPartType;
-    const state = part.state as { input?: Record<string, unknown>; output?: unknown } | undefined;
-    const input = state?.input;
-    const output = state?.output;
-
-    if (Array.isArray(input?.todos)) {
-        const summary = formatTodoSummary(input.todos);
-        if (summary) return summary;
-    }
-
-    if (Array.isArray(output)) {
-        const summary = formatTodoSummary(output);
-        if (summary) return summary;
-    }
-
-    if (output && typeof output === 'object' && Array.isArray((output as { todos?: unknown }).todos)) {
-        const summary = formatTodoSummary((output as { todos: unknown[] }).todos);
-        if (summary) return summary;
-    }
-
-    if (typeof output === 'string' && output.trim().length > 0) {
-        try {
-            const parsed = JSON.parse(output) as unknown;
-            if (Array.isArray(parsed)) {
-                const summary = formatTodoSummary(parsed);
-                if (summary) return summary;
-            }
-            if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { todos?: unknown }).todos)) {
-                const summary = formatTodoSummary((parsed as { todos: unknown[] }).todos);
-                if (summary) return summary;
-            }
-        } catch {
-            // Ignore non-JSON output.
-        }
-    }
-
-    return null;
-};
-
 const getToolReadOffset = (activity: TurnActivityPart): number | undefined => {
     const part = activity.part as ToolPartType;
     const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
@@ -298,67 +219,22 @@ const resolveSkillFilePath = (skillPathOrDir: string): string => {
 };
 
 /**
- * Get a short description for a static tool (for aggregation display).
+ * Short description for a static tool row (aggregation display). Tool naming
+ * and per-tool input fields live in `@/lib/opencode/tools`; this only trims
+ * the result to the row's width and falls back to a bare file name.
  */
+const SHORT_DESCRIPTION_MAX = 50;
+
 const getToolShortDescription = (activity: TurnActivityPart): string | null => {
     const part = activity.part as ToolPartType;
-    const toolName = part.tool?.toLowerCase() ?? '';
-    const state = part.state as { input?: Record<string, unknown>; metadata?: Record<string, unknown> } | undefined;
-    const input = state?.input;
-    const metadata = state?.metadata;
+    const state = part.state as { input?: ToolInput; metadata?: Metadata } | undefined;
+    const described = toolDescription(part.tool, state?.input, state?.metadata);
 
-    // For search tools, show pattern
-    if (toolName === 'grep' || toolName === 'search' || toolName === 'find' || toolName === 'ripgrep') {
-        const pattern = input?.pattern;
-        if (typeof pattern === 'string' && pattern.trim().length > 0) {
-            return pattern.length > 40 ? pattern.slice(0, 40) + '...' : pattern;
-        }
+    if (described?.kind === 'text') {
+        return described.value.length > SHORT_DESCRIPTION_MAX
+            ? `${described.value.slice(0, SHORT_DESCRIPTION_MAX)}...`
+            : described.value;
     }
-
-    // For glob, show pattern
-    if (toolName === 'glob') {
-        const pattern = input?.pattern;
-        if (typeof pattern === 'string' && pattern.trim().length > 0) {
-            return pattern.length > 40 ? pattern.slice(0, 40) + '...' : pattern;
-        }
-    }
-
-    // For web search tools, show query
-    if (toolName === 'websearch' || toolName === 'web-search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'perplexity') {
-        const query = input?.query;
-        if (typeof query === 'string' && query.trim().length > 0) {
-            return query.length > 50 ? query.slice(0, 50) + '...' : query;
-        }
-    }
-
-    // For skill, show name
-    if (toolName === 'skill') {
-        const name = input?.name;
-        if (typeof name === 'string' && name.trim().length > 0) {
-            return name;
-        }
-    }
-
-    // For fetch-url tools, show URL
-    if (toolName === 'webfetch' || toolName === 'fetch' || toolName === 'curl' || toolName === 'wget') {
-        const url =
-            (typeof input?.url === 'string' && input.url) ||
-            (typeof input?.URL === 'string' && input.URL) ||
-            (typeof metadata?.url === 'string' && metadata.url) ||
-            (typeof metadata?.URL === 'string' && metadata.URL) ||
-            '';
-
-        if (typeof url === 'string' && url.trim().length > 0) {
-            return url.trim();
-        }
-    }
-
-    // For todo tools, show status summary without task names
-    if (toolName === 'todowrite' || toolName === 'todoread') {
-        return getTodoSummaryFromActivity(activity);
-    }
-
-    // Fallback: try filename
     return getToolFileName(activity);
 };
 
@@ -375,9 +251,7 @@ interface ExpandableToolRowProps {
     isMobile: boolean;
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     animateTailText: boolean;
-    animateRows: boolean;
 }
 
 const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
@@ -386,9 +260,7 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
     isMobile,
     onToggleTool,
     onShowPopup,
-    onContentChange,
     animateTailText,
-    animateRows,
 }) => {
     const handleToggle = React.useCallback(() => {
         onToggleTool(activity.id);
@@ -400,23 +272,22 @@ const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
             isExpanded={isExpanded}
             onToggle={handleToggle}
             isMobile={isMobile}
-            onContentChange={onContentChange}
             onShowPopup={onShowPopup}
             animateTailText={animateTailText}
         />
     );
 
-    const maybeWrapped = animateTailText ? (
-        <ToolRevealOnMount animate={true} wipe>
-            {content}
-        </ToolRevealOnMount>
-    ) : content;
-
-    if (!animateRows) {
-        return maybeWrapped;
-    }
-
-    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+    // Wrappers are unconditional: a conditional wrapper changes the element
+    // type at this position when animateTailText/animateRows flip (message
+    // completion), remounting the tool subtree and replaying the reveal wipe.
+    // Both wrappers are inert with animation off.
+    return (
+        <FadeInOnReveal>
+            <ToolRevealOnMount animate={animateTailText} wipe>
+                {content}
+            </ToolRevealOnMount>
+        </FadeInOnReveal>
+    );
 };
 
 const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
@@ -424,9 +295,7 @@ const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
         && prev.isMobile === next.isMobile
         && prev.onToggleTool === next.onToggleTool
         && prev.onShowPopup === next.onShowPopup
-        && prev.onContentChange === next.onContentChange
         && prev.animateTailText === next.animateTailText
-        && prev.animateRows === next.animateRows
         && prev.activity.id === next.activity.id
         && prev.activity.kind === next.activity.kind
         && prev.activity.endedAt === next.activity.endedAt
@@ -437,14 +306,12 @@ interface StaticGroupedToolRowProps {
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
-    animateRows: boolean;
 }
 
 const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
     toolName,
     activities,
     animateTailText,
-    animateRows,
 }) => {
     const content = (
         <StaticToolRow
@@ -454,23 +321,22 @@ const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
         />
     );
 
-    const maybeWrapped = animateTailText ? (
-        <ToolRevealOnMount animate={true} wipe>
-            {content}
-        </ToolRevealOnMount>
-    ) : content;
-
-    if (!animateRows) {
-        return maybeWrapped;
-    }
-
-    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+    // Wrappers are unconditional: a conditional wrapper changes the element
+    // type at this position when animateTailText/animateRows flip (message
+    // completion), remounting the tool subtree and replaying the reveal wipe.
+    // Both wrappers are inert with animation off.
+    return (
+        <FadeInOnReveal>
+            <ToolRevealOnMount animate={animateTailText} wipe>
+                {content}
+            </ToolRevealOnMount>
+        </FadeInOnReveal>
+    );
 };
 
 const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) => {
     return prev.toolName === next.toolName
         && prev.animateTailText === next.animateTailText
-        && prev.animateRows === next.animateRows
         && areActivityListsEqual(prev.activities, next.activities);
 });
 
@@ -569,10 +435,15 @@ const StaticToolRowInner: React.FC<{
     animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
-    const displayName = getToolMetadata(toolName).displayName;
-    const icon = getToolIcon(toolName);
+    // Grouped rows share one normalized name; the registry wants the full
+    // name OpenCode reported, which every activity in the group carries.
+    const firstPart = activities[0]?.part;
+    const presentation = useGuestToolPresentation(firstPart?.type === 'tool' ? firstPart.tool : null);
+    const displayName = presentation?.name ?? getToolMetadata(toolName).displayName;
+    const icon = getToolIcon(toolName, presentation);
     const isReadGroup = toolName.toLowerCase() === 'read';
     const runtime = React.useContext(RuntimeAPIContext);
+    const mobileActions = useMobileAppActions();
     const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
     const skills = useSkillsStore((state) => state.skills);
     const hasRunningActivity = React.useMemo(() => activities.some((activity) => isActivityRunning(activity)), [activities]);
@@ -590,7 +461,7 @@ const StaticToolRowInner: React.FC<{
     }, [activities]);
 
     const skillEntries = React.useMemo(() => {
-        if (toolName.toLowerCase() !== 'skill') return [] as Array<{ name: string; path: string }>;
+        if (!isSkillTool(toolName)) return [] as Array<{ name: string; path: string }>;
 
         const entries: Array<{ name: string; path: string }> = [];
         for (const activity of activities) {
@@ -634,16 +505,29 @@ const StaticToolRowInner: React.FC<{
             return;
         }
 
-        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
-            void ensureOutsideFileGrantForDesktop(absolutePath, currentDirectory).then(() => {
-                const uiStore = useUIStore.getState();
-                const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
-                if (offset && Number.isFinite(offset)) {
-                    uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
-                    return;
-                }
+        // Dedicated mobile app: stage the same pending file focus/navigation
+        // desktop uses, then surface the Files pane (workspace drawer tab),
+        // which consumes it.
+        if (mobileActions) {
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+            } else {
                 uiStore.openContextFile(contextDirectory, absolutePath);
-            });
+            }
+            mobileActions.openFiles();
+            return;
+        }
+
+        if (!isFilePathWithinDirectory(absolutePath, currentDirectory)) {
+            const uiStore = useUIStore.getState();
+            const contextDirectory = currentDirectory || getDirectoryForFilePath(currentDirectory, absolutePath);
+            if (offset && Number.isFinite(offset)) {
+                uiStore.openContextFileAtLine(contextDirectory, absolutePath, Math.max(1, Math.trunc(offset)), 1);
+                return;
+            }
+            uiStore.openContextFile(contextDirectory, absolutePath);
             return;
         }
 
@@ -654,7 +538,7 @@ const StaticToolRowInner: React.FC<{
             return;
         }
         uiStore.openContextFile(contextDirectory, absolutePath);
-    }, [currentDirectory, runtime]);
+    }, [currentDirectory, mobileActions, runtime]);
 
     const normalizedToolName = toolName.toLowerCase();
     const isSearchGroup = normalizedToolName === 'grep'
@@ -663,12 +547,15 @@ const StaticToolRowInner: React.FC<{
         || normalizedToolName === 'ripgrep'
         || normalizedToolName === 'glob';
     const isFetchGroup = normalizedToolName === 'webfetch' || normalizedToolName === 'fetch' || normalizedToolName === 'curl' || normalizedToolName === 'wget';
-    const isSkillGroup = normalizedToolName === 'skill';
+    const isSkillGroup = isSkillTool(normalizedToolName);
 
     return (
         <div
+            // oc-static-tool-row: on touch devices mobile.css raises this to the
+            // same 36px floor the [role="button"] expandable/reasoning rows get,
+            // so static and expandable rows have identical rhythm.
             className={cn(
-                'flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
+                'oc-static-tool-row flex w-full items-center gap-x-1.5 pr-2 pl-px py-1.5 rounded-xl min-w-0'
             )}
         >
             <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
@@ -775,9 +662,8 @@ export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
-const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhase }: {
+const InlineReasoningBlock = React.memo(({ activity, streamPhase }: {
     activity: TurnActivityPart;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     streamPhase: StreamPhase;
 }) => {
     return (
@@ -785,7 +671,6 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
             part={activity.part}
             messageId={activity.messageId}
             streamPhase={streamPhase}
-            onContentChange={onContentChange}
         />
     );
 });
@@ -793,16 +678,14 @@ const InlineReasoningBlock = React.memo(({ activity, onContentChange, streamPhas
 /**
  * Inline justification text block — rendered as normal assistant text between tools.
  */
-const InlineJustificationBlock = React.memo(({ activity, onContentChange, actions }: {
+const InlineJustificationBlock = React.memo(({ activity, actions }: {
     activity: TurnActivityPart;
-    onContentChange?: (reason?: ContentChangeReason) => void;
     actions?: React.ReactNode;
 }) => {
     return (
         <JustificationBlock
             part={activity.part}
             messageId={activity.messageId}
-            onContentChange={onContentChange}
             actions={actions}
         />
     );
@@ -817,7 +700,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     expandedTools,
     onToggleTool,
     onShowPopup,
-    onContentChange,
     streamPhase,
     showHeader,
     animateRows = true,
@@ -878,7 +760,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         <InlineReasoningBlock
                             activity={row.activity}
                             streamPhase={streamPhase}
-                            onContentChange={onContentChange}
                         />
                     </>
                 );
@@ -889,7 +770,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                     <>
                         <InlineJustificationBlock
                             activity={row.activity}
-                            onContentChange={onContentChange}
                             actions={renderJustificationActions?.(row.activity)}
                         />
                     </>
@@ -904,9 +784,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -917,7 +795,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         toolName={row.toolName}
                         activities={row.activities}
                         animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -930,9 +807,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         isMobile={isMobile}
                         onToggleTool={onToggleTool}
                         onShowPopup={onShowPopup}
-                        onContentChange={onContentChange}
                         animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        animateRows={animateRows}
                     />
                 );
 
@@ -947,7 +822,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     if (!showHeader) {
         return (
             <FadeInOnReveal>
-                <div className="mt-1 mb-2 space-y-1.5">{renderedRows}</div>
+                <div className="mt-1 mb-2">{renderedRows}</div>
             </FadeInOnReveal>
         );
     }
@@ -990,7 +865,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                 +{previewHiddenCount} more...
                             </button>
                         ) : null}
-                        <div className="space-y-1.5">{renderedRows}</div>
+                        {/* No gap between rows: each row carries its own padding, and
+                            the live timeline stacks the same rows with nothing between
+                            them, so the sorted view keeps the identical rhythm. */}
+                        <div>{renderedRows}</div>
                     </div>
                 ) : null}
             </div>

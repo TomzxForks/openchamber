@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import {
   compareSessionsByLifecycleOrder,
   observeSessionActivityEvent,
@@ -7,7 +7,9 @@ import {
   reconcileSessionActivitySnapshot,
   removeSessionOrdering,
   resetSessionOrdering,
+  promoteRestoredSessionOrdering,
   useSessionOrderingStore,
+  raiseSessionOrderingBaselines,
 } from './session-ordering';
 
 const session = (
@@ -29,7 +31,7 @@ describe('session lifecycle ordering', () => {
 
     observeSessionActivityEvent('session-a', 'active');
     const activeRank = useSessionOrderingStore.getState().rankById.get('session-a');
-    expect(typeof activeRank).toBe('number');
+    expect(activeRank ?? 0).toBeGreaterThan(0);
 
     observeSessionActivityEvent('session-a', 'active');
     expect(useSessionOrderingStore.getState().rankById.get('session-a')).toBe(activeRank);
@@ -95,6 +97,27 @@ describe('session lifecycle ordering', () => {
     expect(useSessionOrderingStore.getState().rankById.has('session-a')).toBe(false);
   });
 
+  test('promotes a restored session without synthesizing lifecycle activity', () => {
+    const restored = session('restored', 10);
+
+    promoteRestoredSessionOrdering(restored.id);
+    const restoredRank = useSessionOrderingStore.getState().rankById.get(restored.id);
+
+    expect(restored.time.updated).toBe(10);
+    expect(restoredRank).toBeGreaterThan(10);
+
+    observeSessionActivityEvent(restored.id, 'settled');
+    expect(useSessionOrderingStore.getState().rankById.get(restored.id)).toBe(restoredRank);
+  });
+
+  test('clears restored ordering promotion on runtime ordering reset', () => {
+    promoteRestoredSessionOrdering('restored');
+
+    resetSessionOrdering();
+
+    expect(useSessionOrderingStore.getState().rankById.has('restored')).toBe(false);
+  });
+
   test('sorts each forest scope before flattening parent-first', () => {
     const rootOlder = session('root-older', 10);
     const rootNewer = session('root-newer', 20);
@@ -118,6 +141,32 @@ describe('session lifecycle ordering', () => {
     ]);
   });
 
+  test('orders roots, siblings, orphan parents, and cyclic parent scopes deterministically', () => {
+    const rootOlder = session('root-older', 10);
+    const rootNewer = session('root-newer', 20);
+    const childOlder = session('child-older', 5, 'root-older');
+    const childNewer = session('child-newer', 6, 'root-older');
+    const orphanOlder = session('orphan-older', 10, 'missing-parent');
+    const orphanNewer = session('orphan-newer', 20, 'missing-parent');
+    const cycleOlder = session('cycle-older', 10, 'cycle-newer');
+    const cycleNewer = session('cycle-newer', 20, 'cycle-older');
+
+    expect(orderSessionsByLifecycleScopes(
+      [cycleOlder, rootOlder, childOlder, orphanOlder, cycleNewer, rootNewer, childNewer, orphanNewer],
+      new Set(),
+      new Map(),
+    ).map((item) => item.id)).toEqual([
+      'orphan-newer',
+      'root-newer',
+      'orphan-older',
+      'root-older',
+      'child-newer',
+      'child-older',
+      'cycle-newer',
+      'cycle-older',
+    ]);
+  });
+
   test('does not promote a root when only its child has lifecycle activity', () => {
     const rootOlder = session('root-older', 10);
     const rootNewer = session('root-newer', 20);
@@ -134,5 +183,38 @@ describe('session lifecycle ordering', () => {
       'root-older',
       'active-child',
     ]);
+  });
+
+  test('authoritative snapshot raises frozen baselines without live ranks', () => {
+    const older = session('older', 10);
+    const newer = session('newer', 20);
+    // Freeze both baselines at their first-seen timestamps.
+    expect(compareSessionsByLifecycleOrder(older, newer, new Set(), new Map())).toBeGreaterThan(0);
+
+    // A metadata-only live update must NOT reorder (frozen baseline)...
+    const liveBump = session('older', 30);
+    expect(compareSessionsByLifecycleOrder(liveBump, newer, new Set(), new Map())).toBeGreaterThan(0);
+
+    // ...but an authoritative snapshot with the newer stamp raises the baseline.
+    raiseSessionOrderingBaselines([liveBump, newer]);
+    expect(compareSessionsByLifecycleOrder(liveBump, newer, new Set(), new Map())).toBeLessThan(0);
+  });
+
+  test('store-held stale live rank is raised by an authoritative snapshot', () => {
+    useSessionOrderingStore.setState({ rankById: new Map([['stale', 15]]) });
+    raiseSessionOrderingBaselines([session('stale', 40)]);
+    expect(useSessionOrderingStore.getState().rankById.get('stale')).toBe(40);
+  });
+
+  test('a metadata write that bumps updated does not lift a session past its last turn', () => {
+    const touched = { ...session('touched', 100), time: { created: 1, updated: 100, idle: 10 } } as Session;
+    const talked = { ...session('talked', 20), time: { created: 2, updated: 20, idle: 20 } } as Session;
+    raiseSessionOrderingBaselines([touched, talked]);
+    expect(compareSessionsByLifecycleOrder(touched, talked, new Set(), new Map())).toBeGreaterThan(0);
+  });
+
+  test('a migrated session without idle still orders by updated', () => {
+    raiseSessionOrderingBaselines([session('migrated', 50), session('fresh', 20)]);
+    expect(compareSessionsByLifecycleOrder(session('migrated', 50), session('fresh', 20), new Set(), new Map())).toBeLessThan(0);
   });
 });

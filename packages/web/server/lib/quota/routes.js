@@ -1,11 +1,11 @@
 import express from 'express';
 import { deleteManagedCredential, getManagedCredentialStatus, normalizers, readManagedCredential, writeManagedCredential } from './credentials/providers.js';
-import { fetchOpenCodeGoUsage } from './providers/opencode-go.js';
 import { fetchOllamaCloudUsage } from './providers/ollama-cloud.js';
 import { importCursorCredential, validateCursorCredential } from './providers/cursor.js';
+import { fetchExeDevUsage } from './providers/exe-dev.js';
 
 const validators = {
-  'opencode-go': fetchOpenCodeGoUsage,
+  'exe-dev': fetchExeDevUsage,
   'ollama-cloud': fetchOllamaCloudUsage,
   cursor: validateCursorCredential,
 };
@@ -28,7 +28,7 @@ export function registerQuotaRoutes(app, { getQuotaProviders }) {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
       const { listConfiguredQuotaProviders } = await getQuotaProviders();
-      res.json({ providers: listConfiguredQuotaProviders() });
+      res.json({ providers: await listConfiguredQuotaProviders() });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
       res.status(500).json({ error: error.message || 'Failed to list quota providers' });

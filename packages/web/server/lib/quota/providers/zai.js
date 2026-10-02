@@ -1,9 +1,10 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
   buildResult,
   toUsageWindow,
+  toNumber,
   resolveWindowSeconds,
   resolveWindowLabel,
   normalizeTimestamp
@@ -13,14 +14,27 @@ export const providerId = 'zai-coding-plan';
 export const providerName = 'z.ai';
 const aliases = ['zai-coding-plan', 'zai', 'z.ai'];
 
-export const isConfigured = () => {
-  const auth = readAuthFile();
+// CREDIT_LIMIT entries carry `usage` (total credits), `currentValue` (consumed),
+// and `remaining`; TOKENS_LIMIT entries only carry a percentage.
+const formatCreditAmount = (value) => {
+  if (value < 1000) return value.toLocaleString('en-US');
+  return `${Math.round(value / 100) / 10}k`;
+};
+
+const formatCreditValueLabel = (limit) => {
+  const used = toNumber(limit?.currentValue);
+  const total = toNumber(limit?.usage);
+  if (used === null || total === null) return null;
+  return `${formatCreditAmount(used)} / ${formatCreditAmount(total)} credits`;
+};
+
+export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
 
@@ -56,16 +70,20 @@ export const fetchQuota = async () => {
     const payload = await response.json();
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows = {};
-    for (const tokensLimit of limits.filter((limit) => limit?.type === 'TOKENS_LIMIT')) {
-      const windowSeconds = resolveWindowSeconds(tokensLimit);
+    // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,
+    // so both limit types map to the same windows.
+    for (const limit of limits.filter((entry) => entry?.type === 'TOKENS_LIMIT' || entry?.type === 'CREDIT_LIMIT')) {
+      const windowSeconds = resolveWindowSeconds(limit);
       const windowLabel = resolveWindowLabel(windowSeconds);
-      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
-      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+      const resetAt = limit?.nextResetTime ? normalizeTimestamp(limit.nextResetTime) : null;
+      const usedPercent = typeof limit?.percentage === 'number' ? limit.percentage : null;
+      const creditValueLabel = formatCreditValueLabel(limit);
 
       windows[windowLabel] = toUsageWindow({
         usedPercent,
         windowSeconds,
-        resetAt
+        resetAt,
+        valueLabel: creditValueLabel
       });
     }
 
@@ -83,7 +101,8 @@ export const fetchQuota = async () => {
       providerName,
       ok: true,
       configured: true,
-      usage: { windows }
+      usage: { windows },
+      planLabel: typeof payload?.data?.level === 'string' && payload.data.level ? payload.data.level : null
     });
   } catch (error) {
     return buildResult({

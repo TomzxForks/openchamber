@@ -1,5 +1,5 @@
 import React from 'react';
-import type { McpStatus } from '@opencode-ai/sdk/v2';
+import type { McpServerStatus } from '@/lib/opencode/model';
 
 import {
   DropdownMenu,
@@ -21,34 +21,33 @@ import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { toast } from 'sonner';
 
 const statusTooltip = (
-  status: McpStatus | undefined,
-  t: (key: 'mcpDropdown.status.unknown' | 'mcpDropdown.status.connected' | 'mcpDropdown.status.failed' | 'mcpDropdown.status.unknownError' | 'mcpDropdown.status.needsAuth' | 'mcpDropdown.status.needsRegistration', params?: { error?: string }) => string
+  server: McpServerStatus | undefined,
+  t: (key: 'mcpDropdown.status.unknown' | 'mcpDropdown.status.connected' | 'mcpDropdown.status.failed' | 'mcpDropdown.status.unknownError' | 'mcpDropdown.status.needsAuth', params?: { error?: string }) => string
 ): string => {
-  if (!status) return t('mcpDropdown.status.unknown');
+  if (!server) return t('mcpDropdown.status.unknown');
+  const status = server.status;
   switch (status.status) {
     case 'connected':
       return t('mcpDropdown.status.connected');
     case 'failed':
-      return t('mcpDropdown.status.failed', { error: (status as { error?: string }).error || t('mcpDropdown.status.unknownError') });
+      return t('mcpDropdown.status.failed', { error: status.error || t('mcpDropdown.status.unknownError') });
     case 'needs_auth':
       return t('mcpDropdown.status.needsAuth');
-    case 'needs_client_registration':
-      return t('mcpDropdown.status.needsRegistration', { error: (status as { error?: string }).error || '' });
     default:
       return status.status;
   }
 };
 
-const statusTone = (status: McpStatus | undefined): 'default' | 'success' | 'warning' | 'error' => {
-  switch (status?.status) {
+const statusTone = (server: McpServerStatus | undefined): 'default' | 'success' | 'warning' | 'error' => {
+  switch (server?.status.status) {
     case 'connected':
       return 'success';
     case 'failed':
       return 'error';
     case 'needs_auth':
-    case 'needs_client_registration':
       return 'warning';
     default:
       return 'default';
@@ -133,7 +132,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             {headerAction}
             <button
               type="button"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               disabled={isSpinning}
               onClick={handleRefresh}
               aria-label={t('mcpDropdown.actions.refreshAria')}
@@ -151,7 +150,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         {sortedNames.map((serverName) => {
           const serverStatus = status[serverName];
           const tone = statusTone(serverStatus);
-          const isConnected = serverStatus?.status === 'connected';
+          const isConnected = serverStatus?.status.status === 'connected';
           const isBusy = busyName === serverName;
           const tooltip = statusTooltip(serverStatus, t);
 
@@ -201,6 +200,8 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
                     } else {
                       await disconnect(serverName, directory);
                     }
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('mcpDropdown.status.unknownError'));
                   } finally {
                     setBusyName(null);
                   }
@@ -299,7 +300,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
       {sortedNames.map((serverName) => {
         const serverStatus = status[serverName];
         const tone = statusTone(serverStatus);
-        const isConnected = serverStatus?.status === 'connected';
+        const isConnected = serverStatus?.status.status === 'connected';
         const isBusy = busyName === serverName;
         const tooltip = statusTooltip(serverStatus, t);
 

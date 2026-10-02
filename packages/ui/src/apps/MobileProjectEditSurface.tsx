@@ -26,11 +26,15 @@ import { useI18n } from '@/lib/i18n';
 import { PROJECT_COLORS, PROJECT_COLOR_MAP, PROJECT_ICONS, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { SpaceRow } from '@/components/session/spaces/SpaceRow';
+import { spacesOfProject, useSpacesJourneyRead } from '@/lib/spaces/spaces-store';
 import { useWorktreeOrderStore } from '@/stores/useWorktreeOrderStore';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 
 import { MobileDeleteWorktreeDialog } from './MobileDeleteWorktreeDialog';
-import { MobileSurfaceShell } from './MobileSurfaceShell';
+import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 
 type MobileEditableProject = {
   id: string;
@@ -52,6 +56,24 @@ type MobileProjectEditSurfaceProps = {
   onWorktreesChanged?: () => void;
 };
 
+/**
+ * The project's isolated spaces on the phone, where the desktop has the spaces page of the project
+ * menu (DESIGN.md, user journey step 9): the same rows, whose actions open the space's sheet. A
+ * space is made from the new-session picker, so there is no create button here.
+ */
+const MobileProjectSpaces: React.FC<{ projectPath: string }> = ({ projectPath }) => {
+  const { t } = useI18n();
+  const { journey } = useSpacesJourneyRead();
+  const spaces = journey ? spacesOfProject(journey, projectPath) : [];
+  return (
+    <div className="flex flex-col gap-2">
+      <label className="typography-ui-label font-medium text-foreground">{t('mobile.projectEdit.spacesTitle')}</label>
+      {journey !== null && spaces.length === 0 ? <p className="typography-meta text-muted-foreground">{t('spaces.page.empty')}</p> : null}
+      {spaces.map((entry) => <SpaceRow key={entry.id} entry={entry} actions="sheet" />)}
+    </div>
+  );
+};
+
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
@@ -67,14 +89,17 @@ const SortableWorktreeRow: React.FC<{
     zIndex: isDragging ? 10 : 1,
   };
   const label = worktree.branch || worktree.label || worktree.path;
+  const removing = useWorktreeRemoving(worktree.path);
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        'flex items-center gap-1 rounded-2xl border border-border/40 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
+        'flex items-center gap-1 rounded-2xl border border-border/70 bg-[var(--surface-elevated)] px-1.5 py-1.5 transition-colors',
         isDragging && 'shadow-lg shadow-black/20',
+        removing && 'opacity-60',
       )}
+      aria-busy={removing || undefined}
     >
       <button
         type="button"
@@ -85,17 +110,25 @@ const SortableWorktreeRow: React.FC<{
       >
         <RiDragMove2Line className="size-4" />
       </button>
-      <Icon name="node-tree" className="size-4 shrink-0 text-muted-foreground" />
+      {removing ? (
+        <span className="inline-flex shrink-0 text-muted-foreground" role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
+          <Icon name="loader-4" className="size-4 animate-spin" />
+        </span>
+      ) : (
+        <Icon name="node-tree" className="size-4 shrink-0 text-muted-foreground" />
+      )}
       <span className="block min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
-      <button
-        type="button"
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-        aria-label={t('mobile.projectEdit.deleteWorktreeAria', { label })}
-        onClick={onDelete}
-        style={{ touchAction: 'manipulation' }}
-      >
-        <RiDeleteBinLine className="size-4" />
-      </button>
+      {removing ? null : (
+        <button
+          type="button"
+          className="flex size-9 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+          aria-label={t('mobile.projectEdit.deleteWorktreeAria', { label })}
+          onClick={onDelete}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <RiDeleteBinLine className="size-4" />
+        </button>
+      )}
     </div>
   );
 };
@@ -108,6 +141,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
 }) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
+  const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
@@ -218,12 +252,12 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
 
   return (
     <>
-      <MobileSurfaceShell
+      <MobileFullscreenSurface
         open={open}
         onClose={onClose}
-        onBack={onClose}
         title={t('projectEditDialog.title')}
         ariaLabel={t('projectEditDialog.title')}
+        noHeaderBorder
         trailing={
           <Button
             type="button"
@@ -293,7 +327,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
                     'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                    color === null ? 'border-foreground' : 'border-border hover:border-border/80',
+                    color === null ? 'border-foreground' : 'border-border/70 hover:border-border/70',
                   )}
                   style={{ touchAction: 'manipulation' }}
                 >
@@ -308,7 +342,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     title={c.label}
                     className={cn(
                       'size-9 rounded-xl border-2 transition-all',
-                      color === c.key ? 'border-foreground' : 'border-transparent hover:border-border',
+                      color === c.key ? 'border-foreground' : 'border-transparent hover:border-border/70',
                     )}
                     style={{ backgroundColor: c.cssVar, touchAction: 'manipulation' }}
                   />
@@ -328,7 +362,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
                     'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                    icon === null ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border hover:border-border/80',
+                    icon === null ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border/70 hover:border-border/70',
                   )}
                   style={{ touchAction: 'manipulation' }}
                 >
@@ -343,7 +377,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     title={i.label}
                     className={cn(
                       'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
-                      icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border hover:border-border/80',
+                      icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border/70 hover:border-border/70',
                     )}
                     style={{ touchAction: 'manipulation' }}
                   >
@@ -400,9 +434,12 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                 )}
               </div>
             ) : null}
+
+            {/* Isolated spaces: while the feature's switch is on; the phone is never VS Code. */}
+            {project.isGitRepo && isolatedSpacesEnabled ? <MobileProjectSpaces projectPath={project.path} /> : null}
           </div>
         ) : null}
-      </MobileSurfaceShell>
+      </MobileFullscreenSurface>
 
       {project ? (
         <MobileDeleteWorktreeDialog

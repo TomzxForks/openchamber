@@ -2,9 +2,10 @@ import React from 'react';
 
 import { isCapacitorApp } from '@/lib/platform';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useUIStore } from '@/stores/useUIStore';
+import { requestMessageFocus } from '@/lib/router/messageFocus';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 
-import { buildDeepLink, parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
 
 /**
  * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
@@ -37,6 +38,12 @@ let pending: DeepLinkIntent | null = null;
 const execute = (intent: DeepLinkIntent): boolean => {
   switch (intent.type) {
     case 'session':
+      // A message link carries no directory; the route opener resolves it.
+      if (intent.messageId && !intent.directory) {
+        void openSessionLink(intent.sessionId, intent.messageId);
+        return true;
+      }
+      if (intent.messageId) requestMessageFocus(intent.sessionId, intent.messageId);
       void useSessionUIStore.getState().setCurrentSession(intent.sessionId, intent.directory ?? null);
       return true;
 
@@ -59,9 +66,10 @@ const execute = (intent: DeepLinkIntent): boolean => {
       return true;
 
     case 'status':
-      // The session status panel is store-backed (useUIStore.mobileSessionPanelOpen),
-      // so it opens without a shell handler — like session/new-session.
-      useUIStore.getState().setMobileSessionPanelOpen(true);
+      // The old input-bar status panel is gone — recent sessions with statuses
+      // now live in the sessions drawer, so route status links there.
+      if (!handlers.openSessions) return false;
+      handlers.openSessions();
       return true;
 
     case 'view':
@@ -93,13 +101,13 @@ const flush = (): void => {
 };
 
 /** Apply an intent now if possible, otherwise stash it until the app is ready / a handler appears. */
-export const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
+const applyDeepLinkIntent = (intent: DeepLinkIntent): void => {
   pending = intent;
   flush();
 };
 
 /** Convenience: parse a raw `openchamber://…` URL and apply it. No-op for unrecognised URLs. */
-export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
+const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   const intent = parseDeepLink(raw);
   if (intent) {
     applyDeepLinkIntent(intent);
@@ -192,7 +200,3 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
     };
   }, []);
 };
-
-// Re-export so producers (notifications, future widgets) have one import for the whole vocabulary.
-export { buildDeepLink, parseDeepLink };
-export type { DeepLinkIntent, SessionsFilter, ViewTarget };

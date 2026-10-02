@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
@@ -6,6 +7,9 @@ export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  /** Absolute path of the `.agents/loops/*.md` file driving this task, when
+   *  any. Present only for loop-sourced tasks; unknown to older clients. */
+  loopFile?: string;
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];
@@ -109,7 +113,50 @@ export const deleteScheduledTask = async (projectID: string, taskID: string): Pr
   return parsed.tasks as ScheduledTask[];
 };
 
-export const runScheduledTaskNow = async (projectID: string, taskID: string): Promise<{ sessionId?: string }> => {
+const getLoopFileEndpoint = (projectID: string, taskID: string): string => {
+  const safeProjectID = ensureProjectID(projectID);
+  const safeTaskID = ensureProjectID(taskID);
+  return `/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/loop-file`;
+};
+
+export const setLoopScheduledTaskEnabled = async (projectID: string, taskID: string, enabled: boolean): Promise<void> => {
+  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to update loop task'));
+  }
+};
+
+export const deleteScheduledTaskLoopFile = async (projectID: string, taskID: string): Promise<void> => {
+  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+    method: 'DELETE',
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, 'Failed to delete loop file'));
+  }
+};
+
+export const syncScheduledTaskLoops = async (projectID: string): Promise<void> => {
+  await fetchScheduledTasks(projectID);
+};
+
+// A malformed field is dropped on its own; the rest of the answer still counts.
+// `directory` is where the run's session lives: a chats-scope run opens a new
+// chat directory, a project run reports the project path.
+const RunNowResponseSchema = z.object({
+  sessionId: z.string().min(1).optional().catch(undefined),
+  directory: z.string().min(1).optional().catch(undefined),
+  persistError: z.string().trim().min(1).optional().catch(undefined),
+});
+
+export const runScheduledTaskNow = async (
+  projectID: string,
+  taskID: string,
+): Promise<{ sessionId?: string; directory?: string; persistError?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
   const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
@@ -121,8 +168,6 @@ export const runScheduledTaskNow = async (projectID: string, taskID: string): Pr
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));
   }
-  const parsed = await response.json().catch(() => null);
-  return {
-    sessionId: typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? parsed.sessionId : undefined,
-  };
+  const parsed = RunNowResponseSchema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? parsed.data : {};
 };

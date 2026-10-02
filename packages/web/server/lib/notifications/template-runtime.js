@@ -1,4 +1,5 @@
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
+import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
@@ -27,9 +28,8 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const formatProjectLabel = (label) => {
     if (!label || typeof label !== 'string') return '';
-    return label
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
+    // Folder names are shown exactly as they are on disk — no title-casing.
+    return label.trim();
   };
 
   const resolveNotificationTemplate = (template, variables) => {
@@ -137,7 +137,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     if (!sessionId) return '';
 
     try {
-      const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
+      const url = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}/message`, '');
       const response = await fetch(`${url}?limit=5`, {
         method: 'GET',
         headers: {
@@ -149,26 +149,23 @@ export const createNotificationTemplateRuntime = (deps) => {
 
       if (!response.ok) return '';
 
-      const messages = await response.json().catch(() => null);
-      if (!Array.isArray(messages)) return '';
+      // v2 pages messages as `{ data, cursor }`, newest first, and a message is
+      // a flat record: an assistant one carries `content[]`, not `parts`.
+      const page = await response.json().catch(() => null);
+      const messages = Array.isArray(page?.data) ? page.data : null;
+      if (!messages) return '';
 
       let target = null;
       if (messageId) {
-        target = messages.find((message) => message?.info?.id === messageId && message?.info?.role === 'assistant');
+        target = messages.find((message) => message?.id === messageId && message?.type === 'assistant');
       }
       if (!target) {
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-          const message = messages[i];
-          if (message?.info?.role === 'assistant' && message?.info?.finish === 'stop') {
-            target = message;
-            break;
-          }
-        }
+        target = messages.find((message) => message?.type === 'assistant' && message?.finish === 'stop') ?? null;
       }
 
-      if (!target || !Array.isArray(target.parts)) return '';
+      if (!target || !Array.isArray(target.content)) return '';
 
-      return extractTextFromParts(target.parts, maxLength);
+      return extractTextFromParts(target.content, maxLength);
     } catch {
       return '';
     }
@@ -202,7 +199,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     }
 
     try {
-      const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+      const url = buildOpenCodeUrl(`/api/session/${encodeURIComponent(sessionId)}`, '');
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json' },
@@ -212,7 +209,7 @@ export const createNotificationTemplateRuntime = (deps) => {
         console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
         return null;
       }
-      const data = await response.json().catch(() => null);
+      const data = unwrapOpenCodeResponse(await response.json().catch(() => null));
       if (data && typeof data === 'object') {
         sessionInfoCache.set(sessionId, { data, at: Date.now() });
         return data;

@@ -10,6 +10,8 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { addSelectionToChat } from '@/lib/addSelectionToChat';
+import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -77,6 +79,7 @@ type MenuAction =
   | 'toggle-terminal'
   | 'toggle-terminal-expanded'
   | 'copy'
+  | 'add-selection-to-chat'
   | 'theme-light'
   | 'theme-dark'
   | 'theme-system'
@@ -100,7 +103,6 @@ export const useMenuActions = (
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
@@ -149,10 +151,9 @@ export const useMenuActions = (
     const nextSession = sessions[nextIndex];
     if (!nextSession) return;
 
-    setActiveMainTab('chat');
     setSessionSwitcherOpen(false);
     useSessionUIStore.getState().setCurrentSession(nextSession.id);
-  }, [setActiveMainTab, setSessionSwitcherOpen]);
+  }, [setSessionSwitcherOpen]);
 
   const navigateProject = React.useCallback((direction: -1 | 1) => {
     const { activeProjectId, projects, setActiveProject } = useProjectsStore.getState();
@@ -189,14 +190,18 @@ export const useMenuActions = (
           break;
 
         case 'new-session':
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
-          openNewSessionDraft();
+                setSessionSwitcherOpen(false);
+          {
+            const sessionState = useSessionUIStore.getState();
+            const directory = useDirectoryStore.getState().currentDirectory;
+            openNewSessionDraft(sessionState.currentSessionId && directory
+              ? { directoryOverride: directory }
+              : undefined);
+          }
           break;
 
         case 'new-worktree-session':
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
+                setSessionSwitcherOpen(false);
           createWorktreeSession();
           break;
 
@@ -278,6 +283,10 @@ export const useMenuActions = (
           setThemeMode('system');
           break;
 
+        case 'add-selection-to-chat':
+          addSelectionToChat();
+          break;
+
         case 'toggle-sidebar':
           toggleSidebar();
           break;
@@ -286,12 +295,14 @@ export const useMenuActions = (
           onToggleMemoryDebug?.();
           break;
 
+        // Same history as the Back/Forward shortcuts, which this menu's
+        // accelerators shadow on Windows and Linux.
         case 'go-back':
-          useDirectoryStore.getState().goBack();
+          navigateSessionHistory(-1);
           break;
 
         case 'go-forward':
-          useDirectoryStore.getState().goForward();
+          navigateSessionHistory(1);
           break;
 
         case 'previous-session':
@@ -329,7 +340,6 @@ export const useMenuActions = (
       onToggleMemoryDebug,
       openNewSessionDraft,
       setAboutDialogOpen,
-      setActiveMainTab,
       setSessionSwitcherOpen,
       setCommandPaletteOpen,
       setSettingsDialogOpen,
